@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "test-remote": {
+      "type": "remote",
+      "url": "https://mcp.example.com/sse",
+      "enabled": true
+    }
+  }
+}

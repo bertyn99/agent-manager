@@ -21,7 +21,8 @@ export class ClaudeAdapter implements AgentAdapter {
 
   detect(): boolean {
     const agentConfig = this.config.agents['claude-code'];
-    return existsSync(agentConfig.configPath);
+    // Check for settings.json or skills directory
+    return existsSync(agentConfig.configPath) || existsSync(this.getSkillsPath());
   }
 
   getSkillsPath(): string {

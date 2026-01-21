@@ -103,7 +103,19 @@ GeminiAdapter.prototype.getAgentInfoSync = function() {
 
 OpenCodeAdapter.prototype.getAgentInfoSync = function() {
   const agentConfig = this.config.agents['opencode'];
-  const installed = this.detect();
+  const installed = agentConfig ? this.detect() : false;
+
+  if (!agentConfig) {
+    return {
+      type: 'opencode',
+      name: 'OpenCode',
+      installed: false,
+      configPath: '',
+      skillsPath: '',
+      extensions: [],
+    };
+  }
+
   return {
     type: 'opencode',
     name: 'OpenCode',

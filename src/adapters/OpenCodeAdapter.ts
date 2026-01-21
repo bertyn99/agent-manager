@@ -53,6 +53,9 @@ export class OpenCodeAdapter implements AgentAdapter {
    */
   detect(): boolean {
     const agentConfig = this.config.agents['opencode'];
+    if (!agentConfig) {
+      return false;
+    }
     return existsSync(agentConfig.skillsPath);
   }
 
@@ -60,14 +63,15 @@ export class OpenCodeAdapter implements AgentAdapter {
    * Get the manifest path for OpenCode
    */
   getManifestPath(): string {
-    return this.config.agents['opencode'].configPath;
+    return this.config.agents['opencode']?.configPath || '';
   }
 
   /**
    * Get the OpenCode config directory
    */
   getConfigDir(): string {
-    return dirname(this.config.agents['opencode'].configPath);
+    const configPath = this.config.agents['opencode']?.configPath;
+    return configPath ? dirname(configPath) : '';
   }
 
   /**
@@ -214,7 +218,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     const agentConfig = this.config.agents['opencode'];
     const extensions: Extension[] = [];
 
-    if (!existsSync(agentConfig.skillsPath)) {
+    if (!agentConfig || !existsSync(agentConfig.skillsPath)) {
       return [];
     }
 
@@ -297,6 +301,10 @@ export class OpenCodeAdapter implements AgentAdapter {
   async addExtension(extension: Extension): Promise<void> {
     const agentConfig = this.config.agents['opencode'];
 
+    if (!agentConfig) {
+      throw new Error('OpenCode is not configured');
+    }
+
     // Handle MCP servers
     if (extension.type === 'mcp' && extension.config) {
       const mcpConfig = extension.config as Record<string, unknown>;
@@ -352,6 +360,11 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   async removeExtension(extensionName: string): Promise<void> {
     const agentConfig = this.config.agents['opencode'];
+
+    if (!agentConfig) {
+      return;
+    }
+
     const extensionPath = join(agentConfig.skillsPath, extensionName);
 
     // First, try to remove from MCP config
@@ -406,8 +419,19 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   async getAgentInfo(): Promise<DetectedAgent> {
     const agentConfig = this.config.agents['opencode'];
-    const installed = this.detect();
+    const installed = agentConfig ? this.detect() : false;
     const extensions = installed ? await this.listExtensions() : [];
+
+    if (!agentConfig) {
+      return {
+        type: 'opencode',
+        name: 'OpenCode',
+        installed: false,
+        configPath: '',
+        skillsPath: '',
+        extensions: [],
+      };
+    }
 
     return {
       type: 'opencode',

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "test-server": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-test", "arg1", "arg2"],
+      "env": {
+        "TEST_VAR": "test-value"
+      }
+    }
+  }
+}

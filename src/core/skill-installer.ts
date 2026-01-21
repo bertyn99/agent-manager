@@ -1,7 +1,8 @@
 // Extension Installer - Handles installing extensions to different agents
 
-import { existsSync, readFileSync, mkdirSync, cpSync, removeSync, writeFileSync, lstatSync, unlinkSync, rmSync, symlinkSync } from 'fs-extra';
+import { existsSync, readFileSync, mkdirSync, cpSync, removeSync, writeFileSync, lstatSync, unlinkSync, rmSync, symlinkSync, readdirSync } from 'fs-extra';
 import { join, basename, dirname } from 'pathe';
+import { homedir } from 'os';
 import { load as yamlLoad } from 'js-yaml';
 import { logger } from '../utils/logger.js';
 import { cloneRepo, getCurrentCommit, getLatestTag } from '../utils/git.js';
@@ -24,6 +25,7 @@ export interface AddOptions {
   nested?: boolean;
   include?: string[];
   exclude?: string[];
+  path?: string;
 }
 
 export interface AddResult {
@@ -108,7 +110,7 @@ export function detectExtensionFormat(repoPath: string): UnifiedExtension | null
       version: frontmatter.version as string | undefined,
       author: frontmatter.author as string | undefined,
       formats: {
-        agentExtensions: {
+        agentSkills: {
           enabled: true,
           path: 'SKILL.md',
         },
@@ -182,6 +184,27 @@ export function detectMultiExtensionRepo(repoPath: string): string[] {
 }
 
 /**
+ * Detect skills in a flat skills folder (skills directly in folder, not in subdirectories)
+ * This handles repos like jezweb/claude-skills where skills are in skills/ directly
+ */
+export function detectSkillsInFolder(folderPath: string): string[] {
+  if (!existsSync(folderPath)) {
+    return [];
+  }
+
+  const skills: string[] = [];
+  for (const dir of readdirSync(folderPath)) {
+    const skillPath = join(folderPath, dir);
+    // Check if it's a directory with SKILL.md
+    if (lstatSync(skillPath).isDirectory() && existsSync(join(skillPath, 'SKILL.md'))) {
+      skills.push(dir);
+    }
+  }
+
+  return skills;
+}
+
+/**
  * Filter extensions based on include/exclude options
  */
 function filterExtensions(allExtensions: string[], include?: string[], exclude?: string[]): string[] {
@@ -202,8 +225,8 @@ function filterExtensions(allExtensions: string[], include?: string[], exclude?:
  * Read OpenCode skills.yaml manifest
  */
 function readOpenCodeManifest(config: AgentManagerConfig): Record<string, unknown> | null {
-  const manifestPath = config.agents['opencode'].configPath;
-  if (!existsSync(manifestPath)) {
+  const manifestPath = config.agents['opencode']?.configPath;
+  if (!manifestPath || !existsSync(manifestPath)) {
     return null;
   }
 
@@ -218,8 +241,12 @@ function readOpenCodeManifest(config: AgentManagerConfig): Record<string, unknow
 /**
  * Add source to OpenCode manifest (for multi-skill repos)
  */
-function addSourceToManifest(config: AgentManagerConfig, repo: string, skillsPath: string, include: string[], exclude: string[]): void {
-  const manifestPath = config.agents['opencode'].configPath;
+function addSourceToManifest(config: AgentManagerConfig, repo: string, skillsPath: string, plugins?: string[], options?: { include?: string[]; exclude?: string[] }): void {
+  const manifestPath = config.agents['opencode']?.configPath;
+  if (!manifestPath) {
+    // OpenCode not configured, skip
+    return;
+  }
   const manifest = readOpenCodeManifest(config) || { sources: [], customized: [], local: [] };
 
   if (!Array.isArray((manifest as Record<string, unknown>).sources)) {
@@ -234,15 +261,19 @@ function addSourceToManifest(config: AgentManagerConfig, repo: string, skillsPat
   }
 
   // Add new source
-  const newSource = {
+  const newSource: Record<string, unknown> = {
     repo,
     path: skillsPath,
     branch: 'main',
-    include: include.length > 0 ? include : ['*'],
-    exclude: exclude,
+    include: options?.include?.length ? options.include : ['*'],
+    exclude: options?.exclude,
   };
+  
+  if (plugins && plugins.length > 0) {
+    newSource.plugins = plugins;
+  }
 
-  (manifest as Record<string, unknown>).sources.push(newSource as unknown);
+  (manifest as Record<string, unknown>).sources.push(newSource);
 
   // Write manifest
   writeFileSync(manifestPath, require('js-yaml').dump(manifest));
@@ -339,7 +370,10 @@ async function installToAgent(
     // Install to OpenCode (extensions)
     if (agentType === 'opencode' && formats.agentExtensions?.enabled) {
       const agentConfig = config.agents['opencode'];
-      
+      if (!agentConfig) {
+        return;
+      }
+
       if (agentConfig.skillsPath) {
         const skillMdPath = join(repoPath, formats.agentExtensions.path || 'SKILL.md');
         if (existsSync(skillMdPath)) {
@@ -470,32 +504,49 @@ export async function addExtension(
       commit = await getCurrentCommit(clonePath);
     }
 
+    // If path is provided, scope to that subdirectory
+    let targetPath = clonePath;
+    if (options.path) {
+      targetPath = join(clonePath, options.path);
+      logger.info(`Scoping to custom path: ${options.path}`);
+      if (!existsSync(targetPath)) {
+        result.error = `Path not found: ${options.path}`;
+        return result;
+      }
+    }
+
     // Check for multi-extension repo (extensions/ subdirectory)
-    const multiExtensions = detectMultiExtensionRepo(clonePath);
-    const isMultiExtension = multiExtensions.length > 0;
+    const multiExtensions = detectMultiExtensionRepo(targetPath);
+    
+    // Also check for flat skills folder (skills directly in folder)
+    const flatSkills = detectSkillsInFolder(targetPath);
+    
+    // Combine both detection methods
+    const allSkills = [...new Set([...multiExtensions, ...flatSkills])];
+    const isMultiExtension = allSkills.length > 0;
 
     if (isMultiExtension) {
       // Multi-extension repo: add to manifest for OpenCode
-      logger.info(`Detected multi-extension repo with ${multiExtensions.length} extensions`);
+      logger.info(`Detected ${allSkills.length} skills`);
       
       // Filter extensions based on include/exclude
-      const filteredExtensions = filterExtensions(multiExtensions, options.include, options.exclude);
+      const filteredExtensions = filterExtensions(allSkills, options.include, options.exclude);
       
       if (filteredExtensions.length > 0) {
-        logger.info(`Installing ${filteredExtensions.length} extensions: ${filteredExtensions.join(', ')}`);
+        logger.info(`Installing ${filteredExtensions.length} skills: ${filteredExtensions.join(', ')}`);
         
         // Add source to agent-manager manifest
         if (!options.dryRun) {
-          addSourceToManifest(config.home, repo, 'extensions', 'main', {
+          addSourceToManifest(config.home, repo, options.path || 'extensions', 'main', {
             include: options.include,
             exclude: options.exclude,
           });
         }
 
-        // Install each extension individually
-        for (const extensionName of filteredExtensions) {
-          const extensionPath = join(clonePath, 'extensions', extensionName);
-          const extension = detectExtensionFormat(extensionPath);
+        // Install each skill individually
+        for (const skillName of filteredExtensions) {
+          const skillPath = join(targetPath, skillName);
+          const extension = detectExtensionFormat(skillPath);
           
           if (extension) {
             result.extension = extension.name;
@@ -507,7 +558,7 @@ export async function addExtension(
                 continue;
               }
               
-              const installed = await installToAgent(extension, agentType, extensionPath, config, options);
+              const installed = await installToAgent(extension, agentType, skillPath, config, options);
               if (installed) {
                 result.installedTo.push(agentType);
                 
@@ -517,8 +568,8 @@ export async function addExtension(
                     description: extension.description,
                     repo,
                     commit,
-                    path: 'extensions',
-                    extensionPath,
+                    path: options.path || 'extensions',
+                    extensionPath: skillPath,
                   });
                 }
               }
@@ -536,7 +587,7 @@ export async function addExtension(
       }
     } else {
       // Single extension repo: install directly
-      const extension = detectExtensionFormat(clonePath);
+      const extension = detectExtensionFormat(targetPath);
       
       if (!extension) {
         result.error = 'No valid extension format found (SKILL.md, extension.json, or gemini-command.toml)';
@@ -564,7 +615,7 @@ export async function addExtension(
           continue;
         }
 
-        const installed = await installToAgent(extension, agentType, clonePath, config, options);
+        const installed = await installToAgent(extension, agentType, targetPath, config, options);
         
         if (installed) {
           result.installedTo.push(agentType);
@@ -575,7 +626,7 @@ export async function addExtension(
               description: extension.description,
               repo,
               commit,
-              extensionPath: clonePath,
+              extensionPath: targetPath,
             });
           }
         }
@@ -602,4 +653,137 @@ export async function addExtension(
   }
 
   return result;
+}
+
+/**
+ * Add a skill to Claude Code's global skills directory
+ * These skills are available to all Claude Code projects
+ */
+export async function addGlobalSkill(
+  repo: string,
+  config: AgentManagerConfig,
+  options: AddOptions
+): Promise<AddResult> {
+  const result: AddResult = {
+    success: false,
+    extension: basename(repo).replace(/\.git$/, ''),
+    installedTo: ['claude-code'],
+  };
+
+  // Claude Code's global skills path
+  const globalSkillsPath = join(process.env.HOME || homedir(), '.claude', 'skills');
+  
+  logger.info(`Adding global skill from ${repo}...`);
+  logger.info(`Target: ${globalSkillsPath}`);
+
+  // Create temp directory for cloning
+  const tempDir = join(config.vendorPath, 'temp');
+  mkdirSync(tempDir, { recursive: true });
+
+  try {
+    // Clone repository
+    const clonePath = join(tempDir, basename(repo).replace(/\.git$/, ''));
+    let commit: string | undefined;
+    
+    if (options.dryRun) {
+      logger.info(`[DRY RUN] Would clone ${repo} to ${clonePath}`);
+    } else {
+      logger.info(`Cloning ${repo}...`);
+      await cloneRepo(repo, clonePath, {
+        depth: options.depth || 1,
+        branch: options.branch,
+      });
+      commit = await getCurrentCommit(clonePath);
+      result.commit = commit;
+    }
+
+    // Handle custom path
+    let targetPath = clonePath;
+    if (options.path) {
+      targetPath = join(clonePath, options.path);
+      logger.info(`Scoping to: ${options.path}`);
+      if (!existsSync(targetPath)) {
+        result.error = `Path not found: ${options.path}`;
+        return result;
+      }
+    }
+
+    // Detect skills
+    const skills = detectMultiExtensionRepo(targetPath);
+    
+    if (skills.length > 0) {
+      // Multi-skill repo
+      logger.info(`Detected ${skills.length} skills`);
+      
+      const filteredSkills = filterExtensions(skills, options.include, options.exclude);
+      
+      if (filteredSkills.length === 0) {
+        result.error = 'No skills match the include/exclude filters';
+        return result;
+      }
+
+      logger.info(`Installing ${filteredSkills.length} skills: ${filteredSkills.join(', ')}`);
+      
+      for (const skillName of filteredSkills) {
+        const skillPath = join(targetPath, 'extensions', skillName);
+        await installSkillToGlobal(skillName, skillPath, globalSkillsPath, options.dryRun);
+      }
+      
+      result.extension = `${filteredSkills.length} skills`;
+    } else {
+      // Single skill repo
+      const extension = detectExtensionFormat(targetPath);
+      
+      if (!extension || !extension.formats.agentSkills?.enabled) {
+        result.error = 'No valid skill format found (SKILL.md required for global skills)';
+        return result;
+      }
+
+      logger.success(`Detected skill: ${extension.name}`);
+      
+      await installSkillToGlobal(extension.name, targetPath, globalSkillsPath, options.dryRun);
+      result.extension = extension.name;
+    }
+
+    result.success = true;
+    logger.success('Successfully installed to Claude Code global skills');
+
+  } catch (error) {
+    result.error = String(error);
+    logger.error(`Failed to add global skill: ${error}`);
+  } finally {
+    // Cleanup
+    if (!options.dryRun && existsSync(tempDir)) {
+      removeSync(tempDir);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Install a skill to Claude Code's global skills directory
+ */
+async function installSkillToGlobal(
+  skillName: string,
+  sourcePath: string,
+  globalSkillsPath: string,
+  dryRun?: boolean
+): Promise<void> {
+  const targetPath = join(globalSkillsPath, skillName);
+  
+  if (dryRun) {
+    logger.info(`[DRY RUN] Would install "${skillName}" to ${targetPath}`);
+    return;
+  }
+
+  mkdirSync(globalSkillsPath, { recursive: true });
+  
+  if (existsSync(targetPath)) {
+    logger.info(`Replacing existing skill: ${skillName}`);
+    rmSync(targetPath, { recursive: true });
+  }
+
+  cpSync(sourcePath, targetPath, { recursive: true });
+  logger.success(`Installed: ${skillName}`);
 }

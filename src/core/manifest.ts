@@ -37,6 +37,8 @@ export interface ManifestSource {
   addedAt: string;
   include?: string[];
   exclude?: string[];
+  plugins?: string[];
+  version?: string;
 }
 
 /**
@@ -210,6 +212,8 @@ export function addSourceToManifest(
   options: {
     include?: string[];
     exclude?: string[];
+    plugins?: string[];
+    version?: string;
   } = {}
 ): void {
   const manifest = readManifest(configHome);
@@ -223,6 +227,8 @@ export function addSourceToManifest(
     existingSource.branch = branch;
     existingSource.include = options.include;
     existingSource.exclude = options.exclude;
+    if (options.plugins) existingSource.plugins = options.plugins;
+    if (options.version) existingSource.version = options.version;
   } else {
     // Add new source
     manifest.sources.push({
@@ -232,6 +238,8 @@ export function addSourceToManifest(
       addedAt: new Date().toISOString(),
       include: options.include,
       exclude: options.exclude,
+      plugins: options.plugins,
+      version: options.version,
     });
   }
 
@@ -346,12 +354,33 @@ export function importFromOpenCodeManifest(
 }
 
 /**
- * Clear all data from manifest (for migration/testing)
+ * Clear all data from manifest (for migration/testing) or remove extensions for a specific agent
  */
-export function clearManifest(configHome: string): void {
+export function clearManifest(configHome: string, agentType?: string): void {
   const manifestPath = getManifestPath(configHome);
   
-  if (existsSync(manifestPath)) {
-    removeSync(manifestPath);
+  if (!existsSync(manifestPath)) {
+    return;
   }
+
+  if (!agentType) {
+    // Clear entire manifest
+    removeSync(manifestPath);
+    return;
+  }
+
+  // Remove only extensions for specific agent
+  const manifest = readManifest(configHome);
+  
+  // Remove from skills
+  manifest.skills = manifest.skills.filter(s => 
+    !s.agents.some(a => a.agent === agentType)
+  );
+
+  // Add empty agents array for remaining skills
+  for (const skill of manifest.skills) {
+    skill.agents = skill.agents.filter(a => a.agent !== agentType);
+  }
+
+  writeManifest(configHome, manifest);
 }

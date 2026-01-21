@@ -98,6 +98,10 @@ async function removeFromAgent(
     // Check if it's a file-based extension (like OpenCode or Gemini CLI)
     if (agentType === 'opencode') {
       const agentConfig = config.agents['opencode'];
+      if (!agentConfig) {
+        return;
+      }
+
       if (agentConfig.skillsPath) {
         const extensionPath = join(agentConfig.skillsPath, `${extensionName}.md`);
         if (existsSync(extensionPath)) {

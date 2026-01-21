@@ -102,7 +102,11 @@ export function loadConfigSync(configPath?: string): AgentManagerConfig {
       manifestPath: result.manifestPath || defaultConfig.manifestPath,
       skillsPath: result.skillsPath || defaultConfig.skillsPath,
       vendorPath: result.vendorPath || defaultConfig.vendorPath,
-      agents: result.agents as Record<string, AgentConfig> || defaultConfig.agents,
+      // Merge agents: use parsed if available, otherwise default
+      agents: {
+        ...defaultConfig.agents,
+        ...result.agents as Record<string, AgentConfig>,
+      },
     };
   } catch {
     return getDefaultConfig();

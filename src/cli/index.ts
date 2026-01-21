@@ -2,10 +2,12 @@
 // Universal CLI to manage extensions across AI coding agents
 
 import { defineCommand, runMain } from 'citty';
+import { existsSync, readdirSync, rmSync, readJSONSync, writeFileSync } from 'fs-extra';
+import { join } from 'pathe';
 import { logger } from '../utils/logger.js';
 import { loadConfigSync, ensureDirs } from '../core/config.js';
 import { createAgentRegistry } from '../adapters/index.js';
-import { addExtension } from '../core/skill-installer.js';
+import { addExtension, addGlobalSkill } from '../core/skill-installer.js';
 import { removeExtension } from '../core/skill-remover.js';
 import { syncExtensions, upgradeExtension, upgradeAllExtensions } from '../core/skill-sync.js';
 import { readManifest, importFromOpenCodeManifest, clearManifest } from '../core/manifest.js';
@@ -50,8 +52,8 @@ async function runList(options: { json?: boolean; verbose?: boolean }) {
     return;
   }
   
-  // Group by type first, then by agent
-  const byType: Record<string, Record<string, typeof extensions>> = {
+  // Group by type first, then by extension name, tracking which agents have it
+  const byType: Record<string, Record<string, Set<string>>> = {
     mcp: {},
     command: {},
     skill: {},
@@ -62,10 +64,10 @@ async function runList(options: { json?: boolean; verbose?: boolean }) {
     if (!byType[type]) {
       byType[type] = {};
     }
-    if (!byType[type][extension.agent]) {
-      byType[type][extension.agent] = [];
+    if (!byType[type][extension.name]) {
+      byType[type][extension.name] = new Set();
     }
-    byType[type][extension.agent].push(extension);
+    byType[type][extension.name].add(extension.agent);
   }
   
   const typeNames: Record<string, string> = {
@@ -80,20 +82,33 @@ async function runList(options: { json?: boolean; verbose?: boolean }) {
     skill: '📝',
   };
   
-  for (const [type, byAgent] of Object.entries(byType)) {
-    const agents = Object.entries(byAgent);
-    if (agents.length === 0) continue;
+  const agentColors: Record<string, string> = {
+    'claude-code': 'Claude Code',
+    'cursor': 'Cursor',
+    'gemini-cli': 'Gemini CLI',
+    'opencode': 'OpenCode',
+  };
+  
+  for (const [type, byName] of Object.entries(byType)) {
+    const extensionNames = Object.keys(byName).sort();
+    if (extensionNames.length === 0) continue;
     
-    const extCount = agents.reduce((sum, [, exts]) => sum + exts.length, 0);
+    const extCount = extensionNames.length;
     logger.info(`\n${typeNames[type]} (${extCount})\n`);
     
-    for (const [agent, agentExtensions] of agents) {
-      logger.info(`${agent.toUpperCase()}:`);
-      for (const extension of agentExtensions) {
-        const icon = extension.enabled ? '✓' : '✗';
-        logger.log(`  ${icon} ${extension.name}`);
-        if (options.verbose && extension.description) {
-          logger.log(`     ${extension.description.slice(0, 60)}...`);
+    for (const name of extensionNames) {
+      const agents = Array.from(byName[name]).sort();
+      const agentTags = agents.map(a => {
+        const shortName = a.replace('-cli', '').replace('-code', '').replace('opencode', 'oc');
+        return `[${shortName}]`;
+      }).join(' ');
+      
+      logger.log(`  ${typeIcons[type]} ${name}`);
+      logger.log(`     ${agentTags}`);
+      if (options.verbose) {
+        const ext = extensions.find(e => e.name === name);
+        if (ext?.description) {
+          logger.log(`     ${ext.description.slice(0, 60)}...`);
         }
       }
     }
@@ -142,9 +157,34 @@ async function runAdd(args: {
   nested?: boolean;
   include?: string;
   exclude?: string;
+  path?: string;
+  global?: boolean;
 }) {
   const config = loadConfigSync();
   ensureDirs(config);
+  
+  // Handle --global flag: install to Claude Code global skills
+  if (args.global) {
+    if (args.to) {
+      logger.warn('--global ignores --to, installing to Claude Code global skills');
+    }
+    const result = await addGlobalSkill(args.repo, config, {
+      dryRun: args.dryRun,
+      nested: args.nested,
+      include: args.include?.split(',').map(s => s.trim()),
+      exclude: args.exclude?.split(',').map(s => s.trim()),
+      path: args.path,
+    });
+    
+    if (result.success) {
+      logger.success(`Successfully added global skill(s) "${result.extension}"`);
+      logger.info('Installed to: ~/.claude/skills/ (available to all Claude Code projects)');
+    } else {
+      logger.error(`Failed to add global skill: ${result.error}`);
+      process.exit(1);
+    }
+    return;
+  }
   
   // Parse target agents
   const targetAgents = args.to 
@@ -157,6 +197,7 @@ async function runAdd(args: {
     nested: args.nested,
     include: args.include?.split(',').map(s => s.trim()),
     exclude: args.exclude?.split(',').map(s => s.trim()),
+    path: args.path,
   });
   
   if (result.success) {
@@ -197,18 +238,40 @@ async function runRemove(args: {
   }
 }
 
-async function runSync(args: { dryRun?: boolean }) {
+async function runSync(args: { 
+  from?: string;
+  to?: string;
+  dryRun?: boolean;
+}) {
   const config = loadConfigSync();
+  ensureDirs(config);
   
+  // Parse agents
+  const sourceAgents = args.from 
+    ? args.from.split(',').map(a => a.trim()) as AgentType[]
+    : undefined;
+    
+  const targetAgentsArg = args.to 
+    ? args.to.split(',').map(a => a.trim()) as AgentType[]
+    : undefined;
+
   const result = await syncExtensions(config, {
+    from: sourceAgents,
+    to: targetAgentsArg,
     dryRun: args.dryRun,
   });
   
   if (result.synced > 0) {
-    logger.success(`${result.synced} extensions in sync`);
+    logger.success(`Synced ${result.synced} extensions`);
+  }
+  if (result.added.length > 0) {
+    logger.info(`Added to: ${result.added.join(', ')}`);
   }
   if (result.skipped > 0) {
-    logger.info(`${result.skipped} extensions need syncing`);
+    logger.info(`${result.skipped} extensions already exist on target agents`);
+  }
+  if (result.failed > 0) {
+    logger.warn(`${result.failed} extensions failed to sync`);
   }
   
   if (result.details.length > 0) {
@@ -217,6 +280,127 @@ async function runSync(args: { dryRun?: boolean }) {
       logger.log(`  - ${detail}`);
     }
   }
+}
+
+async function runClean(args: { 
+  agent: string; 
+  skills?: boolean; 
+  mcp?: boolean; 
+  command?: boolean; 
+  all?: boolean;
+  force?: boolean; 
+  dryRun?: boolean;
+}) {
+  const agentType = args.agent as AgentType;
+  const config = loadConfigSync();
+  
+  if (!config.agents[agentType]) {
+    logger.error(`Unknown agent: ${agentType}`);
+    logger.info(`Available agents: claude-code, cursor, gemini-cli, opencode`);
+    process.exit(1);
+  }
+
+  const agentConfig = config.agents[agentType];
+  const registry = createAgentRegistry(config);
+  const adapter = registry.getAdapter(agentType);
+  
+  if (!adapter || !adapter.detect()) {
+    logger.warn(`${agentType} is not installed`);
+    return;
+  }
+
+  // Determine what to clean
+  const cleanSkills = args.all || args.skills || (!args.mcp && !args.command && !args.all);
+  const cleanMcp = args.all || args.mcp || (!args.skills && !args.command && !args.all);
+  const cleanCommands = args.all || args.command || false;
+
+  // Get current extensions
+  const extensions = await adapter.listExtensions();
+  const skills = extensions.filter(e => e.type === 'skill');
+  const mcps = extensions.filter(e => e.type === 'mcp');
+  const commands = extensions.filter(e => e.type === 'command');
+
+  const totalToClean = (cleanSkills ? skills.length : 0) + 
+                       (cleanMcp ? mcps.length : 0) + 
+                       (cleanCommands ? commands.length : 0);
+
+  if (totalToClean === 0) {
+    logger.info(`${agentType} has no extensions matching the selected criteria`);
+    return;
+  }
+
+  // Show what will be cleaned
+  logger.info(`Extensions on ${agentType}:`);
+  if (cleanSkills) logger.info(`  - Skills: ${skills.length}`);
+  if (cleanMcp) logger.info(`  - MCP Servers: ${mcps.length}`);
+  if (cleanCommands) logger.info(`  - Commands: ${commands.length}`);
+
+  if (args.dryRun) {
+    logger.info(`[DRY RUN] Would remove ${totalToClean} extensions`);
+    return;
+  }
+
+  if (!args.force) {
+    logger.warn(`This will remove ${totalToClean} extensions from ${agentType}`);
+    logger.info(`Run with --force to skip this confirmation`);
+    return;
+  }
+
+  // Clean skills
+  if (cleanSkills && agentConfig.skillsPath && existsSync(agentConfig.skillsPath)) {
+    const skillDirs = readdirSync(agentConfig.skillsPath);
+    
+    if (skillDirs.length > 0) {
+      logger.info(`Removing ${skillDirs.length} skills from ${agentConfig.skillsPath}`);
+      for (const skill of skillDirs) {
+        const skillPath = join(agentConfig.skillsPath, skill);
+        rmSync(skillPath, { recursive: true });
+        logger.success(`Removed skill: ${skill}`);
+      }
+    }
+  }
+
+  // Clean MCP config
+  if (cleanMcp && existsSync(agentConfig.configPath)) {
+    try {
+      const mcpConfig = readJSONSync(agentConfig.configPath);
+      
+      if (mcpConfig.mcpServers && Object.keys(mcpConfig.mcpServers).length > 0) {
+        const mcpNames = Object.keys(mcpConfig.mcpServers);
+        logger.info(`Removing ${mcpNames.length} MCP servers from ${agentConfig.configPath}`);
+        
+        for (const name of mcpNames) {
+          logger.success(`Removed MCP server: ${name}`);
+        }
+        
+        mcpConfig.mcpServers = {};
+        writeFileSync(agentConfig.configPath, JSON.stringify(mcpConfig, null, 2));
+      } else {
+        logger.info('No MCP servers to remove');
+      }
+    } catch (e) {
+      logger.warn(`Could not clear MCP config: ${String(e)}`);
+    }
+  }
+
+  // Clean commands (for Gemini CLI)
+  if (cleanCommands && agentConfig.skillsPath && existsSync(agentConfig.skillsPath)) {
+    const commandFiles = readdirSync(agentConfig.skillsPath).filter(f => f.endsWith('.toml'));
+    
+    if (commandFiles.length > 0) {
+      logger.info(`Removing ${commandFiles.length} commands from ${agentConfig.skillsPath}`);
+      for (const cmd of commandFiles) {
+        const cmdPath = join(agentConfig.skillsPath, cmd);
+        rmSync(cmdPath);
+        logger.success(`Removed command: ${cmd}`);
+      }
+    }
+  }
+
+  // Clear from manifest
+  clearManifest(config.home, agentType);
+
+  logger.success(`Cleaned ${totalToClean} extensions from ${agentType}`);
 }
 
 async function runUpgrade(args: { 
@@ -619,6 +803,14 @@ const addCommand = defineCommand({
       type: 'string',
       description: 'Comma-separated list of extensions to exclude (multi-extension repos)',
     },
+    path: {
+      type: 'string',
+      description: 'Path to plugin or skills directory within the repository (e.g., plugins/frontend/skills)',
+    },
+    global: {
+      type: 'boolean',
+      description: 'Install skills to Claude Code global skills directory (available to all Claude Code projects)',
+    },
   },
   run({ args }) {
     runAdd(args);
@@ -649,9 +841,17 @@ const removeCommand = defineCommand({
 const syncCommand = defineCommand({
   meta: {
     name: 'sync',
-    description: 'Synchronize extensions across all agents',
+    description: 'Synchronize/replicate extensions from one agent to others',
   },
   args: {
+    from: {
+      type: 'string',
+      description: 'Source agent to copy extensions from (comma-separated)',
+    },
+    to: {
+      type: 'string',
+      description: 'Target agents to install extensions to (comma-separated, defaults to all other agents)',
+    },
     dryRun: {
       type: 'boolean',
       description: 'Preview changes without applying',
@@ -660,6 +860,48 @@ const syncCommand = defineCommand({
   },
   run({ args }) {
     runSync(args);
+  },
+});
+
+const cleanCommand = defineCommand({
+  meta: {
+    name: 'clean',
+    description: 'Remove extensions from an agent (skills, MCP servers, or commands)',
+  },
+  args: {
+    agent: {
+      type: 'positional',
+      description: 'Agent to clean (claude-code, cursor, gemini-cli, opencode)',
+      required: true,
+    },
+    skills: {
+      type: 'boolean',
+      description: 'Remove skills only',
+    },
+    mcp: {
+      type: 'boolean',
+      description: 'Remove MCP servers only',
+    },
+    command: {
+      type: 'boolean',
+      description: 'Remove commands only',
+    },
+    all: {
+      type: 'boolean',
+      description: 'Remove all extension types (skills, MCP, commands)',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Skip confirmation prompt',
+    },
+    dryRun: {
+      type: 'boolean',
+      description: 'Preview what would be removed without applying',
+      alias: 'd',
+    },
+  },
+  run({ args }) {
+    runClean(args);
   },
 });
 
@@ -845,6 +1087,7 @@ const mainCommand = defineCommand({
     add: addCommand,
     remove: removeCommand,
     sync: syncCommand,
+    clean: cleanCommand,
     upgrade: upgradeCommand,
     migrate: migrateCommand,
     manifest: manifestCommand,
