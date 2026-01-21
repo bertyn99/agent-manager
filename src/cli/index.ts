@@ -1,13 +1,13 @@
 // Agent Manager CLI - Built with Citty, Consola, and UnJS Stack
-// Universal CLI to manage skills across AI coding agents
+// Universal CLI to manage extensions across AI coding agents
 
 import { defineCommand, runMain } from 'citty';
 import { logger } from '../utils/logger.js';
 import { loadConfigSync, ensureDirs } from '../core/config.js';
 import { createAgentRegistry } from '../adapters/index.js';
-import { addSkill } from '../core/skill-installer.js';
-import { removeSkill } from '../core/skill-remover.js';
-import { syncSkills, upgradeSkill, upgradeAllSkills } from '../core/skill-sync.js';
+import { addExtension } from '../core/skill-installer.js';
+import { removeExtension } from '../core/skill-remover.js';
+import { syncExtensions, upgradeExtension, upgradeAllExtensions } from '../core/skill-sync.js';
 import { readManifest, importFromOpenCodeManifest, clearManifest } from '../core/manifest.js';
 import type { AgentType } from '../core/types.js';
 
@@ -28,7 +28,7 @@ function runDetect() {
   
   for (const agent of agents) {
     const status = agent.installed ? '✓ Installed' : '✗ Not installed';
-    logger.info(`${agent.name}: ${status} (${agent.skills.length} skills)`);
+    logger.info(`${agent.name}: ${status} (${agent.extensions.length} extensions)`);
   }
   
   logger.success(`Found ${agents.length} agent(s)`);
@@ -37,36 +37,64 @@ function runDetect() {
 async function runList(options: { json?: boolean; verbose?: boolean }) {
   const config = loadConfigSync();
   const registry = createAgentRegistry(config);
-  const skills = await registry.listAllSkills();
+  const extensions = await registry.listAllExtensions();
   
-  if (skills.length === 0) {
-    logger.warn('No skills found.');
-    logger.info('Use "agent-manager add <repo>" to add skills.');
+  if (extensions.length === 0) {
+    logger.warn('No extensions found.');
+    logger.info('Use "agent-manager add <repo>" to add extensions.');
     return;
   }
   
   if (options.json) {
-    console.log(JSON.stringify(skills, null, 2));
+    console.log(JSON.stringify(extensions, null, 2));
     return;
   }
   
-  // Group by agent
-  const byAgent: Record<string, typeof skills> = {};
-  for (const skill of skills) {
-    if (!byAgent[skill.agent]) {
-      byAgent[skill.agent] = [];
+  // Group by type first, then by agent
+  const byType: Record<string, Record<string, typeof extensions>> = {
+    mcp: {},
+    command: {},
+    skill: {},
+  };
+  
+  for (const extension of extensions) {
+    const type = extension.type;
+    if (!byType[type]) {
+      byType[type] = {};
     }
-    byAgent[skill.agent].push(skill);
+    if (!byType[type][extension.agent]) {
+      byType[type][extension.agent] = [];
+    }
+    byType[type][extension.agent].push(extension);
   }
   
-  for (const [agent, agentSkills] of Object.entries(byAgent)) {
-    logger.info(`\n${agent.toUpperCase()} (${agentSkills.length} skills)\n`);
+  const typeNames: Record<string, string> = {
+    mcp: 'MCP Servers',
+    command: 'Commands',
+    skill: 'Skills',
+  };
+  
+  const typeIcons: Record<string, string> = {
+    mcp: '🔌',
+    command: '⚡',
+    skill: '📝',
+  };
+  
+  for (const [type, byAgent] of Object.entries(byType)) {
+    const agents = Object.entries(byAgent);
+    if (agents.length === 0) continue;
     
-    for (const skill of agentSkills) {
-      const icon = skill.type === 'mcp' ? '🔌' : skill.type === 'command' ? '⚡' : '📝';
-      logger.log(`  ${icon} ${skill.name}`);
-      if (options.verbose && skill.description) {
-        logger.log(`     ${skill.description.slice(0, 60)}...`);
+    const extCount = agents.reduce((sum, [, exts]) => sum + exts.length, 0);
+    logger.info(`\n${typeNames[type]} (${extCount})\n`);
+    
+    for (const [agent, agentExtensions] of agents) {
+      logger.info(`${agent.toUpperCase()}:`);
+      for (const extension of agentExtensions) {
+        const icon = extension.enabled ? '✓' : '✗';
+        logger.log(`  ${icon} ${extension.name}`);
+        if (options.verbose && extension.description) {
+          logger.log(`     ${extension.description.slice(0, 60)}...`);
+        }
       }
     }
   }
@@ -123,7 +151,7 @@ async function runAdd(args: {
     ? args.to.split(',').map(a => a.trim()) as AgentType[]
     : undefined;
   
-  const result = await addSkill(args.repo, config, {
+  const result = await addExtension(args.repo, config, {
     to: targetAgents,
     dryRun: args.dryRun,
     nested: args.nested,
@@ -132,7 +160,7 @@ async function runAdd(args: {
   });
   
   if (result.success) {
-    logger.success(`Successfully added skill "${result.skill}"`);
+    logger.success(`Successfully added extension "${result.extension}"`);
     logger.info(`Installed to: ${result.installedTo.join(', ')}`);
     if (result.commit) {
       logger.info(`Commit: ${result.commit.slice(0, 7)}`);
@@ -141,13 +169,13 @@ async function runAdd(args: {
       logger.info(`Tag: ${result.tag}`);
     }
   } else {
-    logger.error(`Failed to add skill: ${result.error}`);
+    logger.error(`Failed to add extension: ${result.error}`);
     process.exit(1);
   }
 }
 
 async function runRemove(args: { 
-  skill: string;
+  extension: string;
   from?: string;
 }) {
   const config = loadConfigSync();
@@ -156,15 +184,15 @@ async function runRemove(args: {
     ? args.from.split(',').map(a => a.trim()) as AgentType[]
     : undefined;
   
-  const result = await removeSkill(args.skill, config, {
+  const result = await removeExtension(args.extension, config, {
     from: targetAgents,
   });
   
   if (result.success) {
-    logger.success(`Successfully removed skill "${result.skill}"`);
+    logger.success(`Successfully removed extension "${result.extension}"`);
     logger.info(`Removed from: ${result.removedFrom.join(', ')}`);
   } else {
-    logger.error(`Failed to remove skill: ${result.error}`);
+    logger.error(`Failed to remove extension: ${result.error}`);
     process.exit(1);
   }
 }
@@ -172,15 +200,15 @@ async function runRemove(args: {
 async function runSync(args: { dryRun?: boolean }) {
   const config = loadConfigSync();
   
-  const result = await syncSkills(config, {
+  const result = await syncExtensions(config, {
     dryRun: args.dryRun,
   });
   
   if (result.synced > 0) {
-    logger.success(`${result.synced} skills in sync`);
+    logger.success(`${result.synced} extensions in sync`);
   }
   if (result.skipped > 0) {
-    logger.info(`${result.skipped} skills need syncing`);
+    logger.info(`${result.skipped} extensions need syncing`);
   }
   
   if (result.details.length > 0) {
@@ -192,17 +220,17 @@ async function runSync(args: { dryRun?: boolean }) {
 }
 
 async function runUpgrade(args: { 
-  skill: string;
+  extension: string;
   all?: boolean;
   force?: boolean;
 }) {
   const config = loadConfigSync();
   
   if (args.all) {
-    const result = await upgradeAllSkills(config, { force: args.force });
+    const result = await upgradeAllExtensions(config, { force: args.force });
     logger.info(`Upgraded: ${result.upgraded}, Failed: ${result.failed}`);
   } else {
-    const result = await upgradeSkill(args.skill, config, { force: args.force });
+    const result = await upgradeExtension(args.extension, config, { force: args.force });
     logger.info(result.message);
   }
 }
@@ -219,6 +247,259 @@ async function runMigrate() {
     logger.warn('Full migration not yet implemented - manual migration required');
   } else {
     logger.info('No skill-manager config found');
+  }
+}
+
+async function runMCP(args: {
+  subcommand: string;
+  name?: string;
+  to?: string;
+  command?: string;
+  args?: string;
+  url?: string;
+  transport?: string;
+}) {
+  const config = loadConfigSync();
+  const registry = createAgentRegistry(config);
+  
+  switch (args.subcommand) {
+    case 'list': {
+      const extensions = await registry.listAllExtensions();
+      const mcpServers = extensions.filter(e => e.type === 'mcp');
+      
+      if (mcpServers.length === 0) {
+        logger.warn('No MCP servers found.');
+        return;
+      }
+      
+      logger.info(`\nMCP Servers (${mcpServers.length})\n`);
+      
+      // Group by agent
+      const byAgent: Record<string, typeof mcpServers> = {};
+      for (const mcp of mcpServers) {
+        if (!byAgent[mcp.agent]) {
+          byAgent[mcp.agent] = [];
+        }
+        byAgent[mcp.agent].push(mcp);
+      }
+      
+      for (const [agent, servers] of Object.entries(byAgent)) {
+        logger.info(`${agent.toUpperCase()}:`);
+        for (const server of servers) {
+          const icon = server.enabled ? '✓' : '✗';
+          logger.log(`  ${icon} ${server.name}`);
+          if (server.config) {
+            const cfg = server.config as Record<string, unknown>;
+            const transport = cfg.type as string || 'unknown';
+            logger.log(`     Transport: ${transport}`);
+          }
+        }
+      }
+      break;
+    }
+    
+    case 'add': {
+      if (!args.name) {
+        logger.error('MCP server name is required');
+        process.exit(1);
+      }
+      
+      // Parse target agents
+      const targetAgents = args.to
+        ? args.to.split(',').map(a => a.trim())
+        : undefined;
+      
+      // Build MCP config
+      const transportType = args.transport || 'command';
+      const mcpConfig: Record<string, unknown> = {
+        type: transportType,
+      };
+      
+      if (args.command) {
+        mcpConfig.command = args.command;
+      }
+      
+      if (args.args) {
+        mcpConfig.args = args.args.split(',').map(a => a.trim());
+      }
+      
+      if (args.url) {
+        mcpConfig.url = args.url;
+      }
+      
+      // Add MCP server
+      const result = await registry.addExtension({
+        name: args.name,
+        type: 'mcp',
+        agent: targetAgents?.[0] as AgentType || 'gemini-cli',
+        config: mcpConfig,
+        enabled: true,
+      }, targetAgents);
+      
+      if (result.success) {
+        logger.success(`MCP server "${args.name}" added successfully`);
+        logger.info(`Installed to: ${result.installedTo.join(', ')}`);
+      } else {
+        logger.error(`Failed to add MCP server: ${result.error}`);
+        process.exit(1);
+      }
+      break;
+    }
+    
+    case 'remove': {
+      if (!args.name) {
+        logger.error('MCP server name is required');
+        process.exit(1);
+      }
+      
+      const targetAgents = args.to
+        ? args.to.split(',').map(a => a.trim())
+        : undefined;
+      
+      const result = await registry.removeExtension(args.name, targetAgents);
+      
+      if (result.success) {
+        logger.success(`MCP server "${args.name}" removed successfully`);
+        logger.info(`Removed from: ${result.removedFrom.join(', ')}`);
+      } else {
+        logger.error(`Failed to remove MCP server: ${result.error}`);
+        process.exit(1);
+      }
+      break;
+    }
+    
+    default:
+      logger.error(`Unknown MCP subcommand: ${args.subcommand}`);
+      process.exit(1);
+  }
+}
+
+async function runCommand(args: {
+  subcommand: string;
+  name?: string;
+  to?: string;
+  description?: string;
+  prompt?: string;
+  output?: string;
+  args?: string;
+  totalBudget?: number;
+}) {
+  const config = loadConfigSync();
+  const registry = createAgentRegistry(config);
+  
+  switch (args.subcommand) {
+    case 'list': {
+      const extensions = await registry.listAllExtensions();
+      const commands = extensions.filter(e => e.type === 'command');
+      
+      if (commands.length === 0) {
+        logger.warn('No commands found.');
+        return;
+      }
+      
+      logger.info(`\nCommands (${commands.length})\n`);
+      
+      // Group by agent
+      const byAgent: Record<string, typeof commands> = {};
+      for (const cmd of commands) {
+        if (!byAgent[cmd.agent]) {
+          byAgent[cmd.agent] = [];
+        }
+        byAgent[cmd.agent].push(cmd);
+      }
+      
+      for (const [agent, cmds] of Object.entries(byAgent)) {
+        logger.info(`${agent.toUpperCase()}:`);
+        for (const cmd of cmds) {
+          const icon = cmd.enabled ? '✓' : '✗';
+          logger.log(`  ${icon} ${cmd.name}`);
+          if (cmd.description) {
+            logger.log(`     ${cmd.description.slice(0, 60)}`);
+          }
+        }
+      }
+      break;
+    }
+    
+    case 'add': {
+      if (!args.name) {
+        logger.error('Command name is required');
+        process.exit(1);
+      }
+      
+      if (!args.prompt) {
+        logger.error('Command prompt is required');
+        process.exit(1);
+      }
+      
+      // Parse target agents
+      const targetAgents = args.to
+        ? args.to.split(',').map(a => a.trim())
+        : undefined;
+      
+      // Build command config
+      const commandConfig: Record<string, unknown> = {
+        name: args.name,
+        description: args.description || '',
+        prompt: args.prompt,
+      };
+      
+      if (args.args) {
+        commandConfig.args = args.args.split(',').map(a => a.trim());
+      }
+      
+      if (args.totalBudget) {
+        commandConfig.totalBudget = args.totalBudget;
+      }
+      
+      if (args.output) {
+        commandConfig.output = args.output;
+      }
+      
+      // Add command
+      const result = await registry.addExtension({
+        name: args.name,
+        type: 'command',
+        agent: targetAgents?.[0] as AgentType || 'gemini-cli',
+        config: commandConfig,
+        enabled: true,
+      }, targetAgents);
+      
+      if (result.success) {
+        logger.success(`Command "${args.name}" added successfully`);
+        logger.info(`Installed to: ${result.installedTo.join(', ')}`);
+      } else {
+        logger.error(`Failed to add command: ${result.error}`);
+        process.exit(1);
+      }
+      break;
+    }
+    
+    case 'remove': {
+      if (!args.name) {
+        logger.error('Command name is required');
+        process.exit(1);
+      }
+      
+      const targetAgents = args.to
+        ? args.to.split(',').map(a => a.trim())
+        : undefined;
+      
+      const result = await registry.removeExtension(args.name, targetAgents);
+      
+      if (result.success) {
+        logger.success(`Command "${args.name}" removed successfully`);
+        logger.info(`Removed from: ${result.removedFrom.join(', ')}`);
+      } else {
+        logger.error(`Failed to remove command: ${result.error}`);
+        process.exit(1);
+      }
+      break;
+    }
+    
+    default:
+      logger.error(`Unknown command subcommand: ${args.subcommand}`);
+      process.exit(1);
   }
 }
 
@@ -288,7 +569,7 @@ const detectCommand = defineCommand({
 const listCommand = defineCommand({
   meta: {
     name: 'list',
-    description: 'List all skills across all detected agents',
+    description: 'List all extensions across all detected agents',
   },
   args: {
     json: {
@@ -306,25 +587,15 @@ const listCommand = defineCommand({
   },
 });
 
-const doctorCommand = defineCommand({
-  meta: {
-    name: 'doctor',
-    description: 'Run health checks on the CLI and environment',
-  },
-  run() {
-    runDoctor();
-  },
-});
-
 const addCommand = defineCommand({
   meta: {
     name: 'add',
-    description: 'Add a skill from a repository',
+    description: 'Add an extension from a repository',
   },
   args: {
     repo: {
       type: 'positional',
-      description: 'Repository URL or path (e.g., github.com/user/skill-repo)',
+      description: 'Repository URL or path (e.g., github.com/user/extension-repo)',
       required: true,
     },
     to: {
@@ -338,15 +609,15 @@ const addCommand = defineCommand({
     },
     nested: {
       type: 'boolean',
-      description: 'Repository has nested skills in subdirectories',
+      description: 'Repository has nested extensions in subdirectories',
     },
     include: {
       type: 'string',
-      description: 'Comma-separated list of skills to include (multi-skill repos)',
+      description: 'Comma-separated list of extensions to include (multi-extension repos)',
     },
     exclude: {
       type: 'string',
-      description: 'Comma-separated list of skills to exclude (multi-skill repos)',
+      description: 'Comma-separated list of extensions to exclude (multi-extension repos)',
     },
   },
   run({ args }) {
@@ -357,12 +628,12 @@ const addCommand = defineCommand({
 const removeCommand = defineCommand({
   meta: {
     name: 'remove',
-    description: 'Remove a skill from agents',
+    description: 'Remove an extension from agents',
   },
   args: {
-    skill: {
+    extension: {
       type: 'positional',
-      description: 'Skill name to remove',
+      description: 'Extension name to remove',
       required: true,
     },
     from: {
@@ -378,7 +649,7 @@ const removeCommand = defineCommand({
 const syncCommand = defineCommand({
   meta: {
     name: 'sync',
-    description: 'Synchronize skills across all agents',
+    description: 'Synchronize extensions across all agents',
   },
   args: {
     dryRun: {
@@ -395,25 +666,35 @@ const syncCommand = defineCommand({
 const upgradeCommand = defineCommand({
   meta: {
     name: 'upgrade',
-    description: 'Upgrade a skill to the latest version',
+    description: 'Upgrade an extension to the latest version',
   },
   args: {
-    skill: {
+    extension: {
       type: 'positional',
-      description: 'Skill name to upgrade',
+      description: 'Extension name to upgrade',
       required: true,
     },
     all: {
       type: 'boolean',
-      description: 'Upgrade all skills',
+      description: 'Upgrade all extensions',
     },
     force: {
       type: 'boolean',
-      description: 'Force upgrade even for vendor skills',
+      description: 'Force upgrade even for vendor extensions',
     },
   },
   run({ args }) {
     runUpgrade(args);
+  },
+});
+
+const doctorCommand = defineCommand({
+  meta: {
+    name: 'doctor',
+    description: 'Run health checks on the CLI and environment',
+  },
+  run() {
+    runDoctor();
   },
 });
 
@@ -451,11 +732,97 @@ const manifestCommand = defineCommand({
   },
 });
 
+const mcpCommand = defineCommand({
+  meta: {
+    name: 'mcp',
+    description: 'Manage MCP servers across AI agents',
+  },
+  args: {
+    subcommand: {
+      type: 'positional',
+      description: 'Subcommand (list, add, remove)',
+      required: true,
+    },
+    name: {
+      type: 'string',
+      description: 'MCP server name',
+    },
+    to: {
+      type: 'string',
+      description: 'Target agents (comma-separated)',
+    },
+    command: {
+      type: 'string',
+      description: 'Command to run MCP server',
+    },
+    args: {
+      type: 'string',
+      description: 'Comma-separated arguments',
+    },
+    url: {
+      type: 'string',
+      description: 'MCP server URL (for http transport)',
+    },
+    transport: {
+      type: 'string',
+      description: 'Transport type (stdio, http, sse, websocket)',
+    },
+  },
+  run({ args }) {
+    runMCP(args as Parameters<typeof runMCP>[0]);
+  },
+});
+
+const commandCommand = defineCommand({
+  meta: {
+    name: 'command',
+    description: 'Manage Gemini CLI commands',
+  },
+  args: {
+    subcommand: {
+      type: 'positional',
+      description: 'Subcommand (list, add, remove)',
+      required: true,
+    },
+    name: {
+      type: 'string',
+      description: 'Command name',
+    },
+    to: {
+      type: 'string',
+      description: 'Target agents (comma-separated)',
+    },
+    description: {
+      type: 'string',
+      description: 'Command description',
+    },
+    prompt: {
+      type: 'string',
+      description: 'Command prompt',
+    },
+    output: {
+      type: 'string',
+      description: 'Output type (text, json, streaming)',
+    },
+    args: {
+      type: 'string',
+      description: 'Comma-separated arguments',
+    },
+    totalBudget: {
+      type: 'number',
+      description: 'Total budget for the command',
+    },
+  },
+  run({ args }) {
+    runCommand(args as Parameters<typeof runCommand>[0]);
+  },
+});
+
 const mainCommand = defineCommand({
   meta: {
     name: 'agent-manager',
     version: '2.0.0',
-    description: 'Universal CLI to manage skills across AI coding agents',
+    description: 'Universal CLI to manage extensions across AI coding agents',
   },
   args: {
     verbose: {
@@ -481,6 +848,8 @@ const mainCommand = defineCommand({
     upgrade: upgradeCommand,
     migrate: migrateCommand,
     manifest: manifestCommand,
+    mcp: mcpCommand,
+    command: commandCommand,
   },
 });
 

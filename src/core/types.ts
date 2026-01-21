@@ -19,16 +19,16 @@ export interface AgentInfo {
 }
 
 export interface DetectedAgent extends AgentInfo {
-  skills: Skill[];
+  extensions: Extension[];
   lastSync?: Date;
 }
 
-// Skill types
-export type SkillType = 'skill' | 'mcp' | 'command' | 'agent' | 'extension';
+// Extension types (MCP servers, skills, commands, etc.)
+export type ExtensionType = 'mcp' | 'skill' | 'command' | 'agent';
 
-export interface Skill {
+export interface Extension {
   name: string;
-  type: SkillType;
+  type: ExtensionType;
   agent: AgentType;
   description?: string;
   path?: string;
@@ -124,7 +124,7 @@ export interface AgentConfig {
 // Command options
 export interface AddOptions {
   to?: AgentType[];
-  only?: SkillType[];
+  only?: ExtensionType[];
   commit?: string;
   tag?: string;
   path?: string;

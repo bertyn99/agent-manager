@@ -1,4 +1,4 @@
-// Skill Installer - Handles installing skills to different agents
+// Extension Installer - Handles installing extensions to different agents
 
 import { existsSync, readFileSync, mkdirSync, cpSync, removeSync, writeFileSync, lstatSync, unlinkSync, rmSync, symlinkSync } from 'fs-extra';
 import { join, basename, dirname } from 'pathe';
@@ -6,13 +6,13 @@ import { load as yamlLoad } from 'js-yaml';
 import { logger } from '../utils/logger.js';
 import { cloneRepo, getCurrentCommit, getLatestTag } from '../utils/git.js';
 import { createAgentRegistry } from '../adapters/index.js';
-import type { AgentManagerConfig, AgentType, Skill, UnifiedSkill } from '../core/types.js';
+import type { AgentManagerConfig, AgentType, Extension, UnifiedExtension } from '../core/types.js';
 import { parse as parseToml } from 'destr';
-import { 
-  addSkillToManifest, 
-  addSourceToManifest, 
+import {
+  addExtensionToManifest,
+  addSourceToManifest,
   readManifest,
-  type AgentManagerManifest 
+  type AgentManagerManifest
 } from './manifest.js';
 
 export interface AddOptions {
@@ -28,7 +28,7 @@ export interface AddOptions {
 
 export interface AddResult {
   success: boolean;
-  skill: string;
+  extension: string;
   installedTo: AgentType[];
   commit?: string;
   tag?: string;
@@ -36,9 +36,9 @@ export interface AddResult {
 }
 
 /**
- * Parse SKILL.md frontmatter to extract skill metadata
+ * Parse SKILL.md frontmatter to extract extension metadata
  */
-export function parseSkillMd(content: string): Record<string, unknown> {
+export function parseExtensionMd(content: string): Record<string, unknown> {
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
   if (!frontmatterMatch) {
     return {};
@@ -81,9 +81,9 @@ export function parseSkillMd(content: string): Record<string, unknown> {
 }
 
 /**
- * Parse skill.json file
+ * Parse extension.json file
  */
-export function parseSkillJson(content: string): Record<string, unknown> {
+export function parseExtensionJson(content: string): Record<string, unknown> {
   try {
     return JSON.parse(content);
   } catch {
@@ -92,14 +92,14 @@ export function parseSkillJson(content: string): Record<string, unknown> {
 }
 
 /**
- * Check if a directory contains a skill
+ * Check if a directory contains an extension
  */
-export function detectSkillFormat(repoPath: string): UnifiedSkill | null {
+export function detectExtensionFormat(repoPath: string): UnifiedExtension | null {
   // Check for SKILL.md
   const skillMdPath = join(repoPath, 'SKILL.md');
   if (existsSync(skillMdPath)) {
     const content = readFileSync(skillMdPath, 'utf-8');
-    const frontmatter = parseSkillMd(content);
+    const frontmatter = parseExtensionMd(content);
     
     return {
       name: String(frontmatter.name || basename(repoPath)),
@@ -108,7 +108,7 @@ export function detectSkillFormat(repoPath: string): UnifiedSkill | null {
       version: frontmatter.version as string | undefined,
       author: frontmatter.author as string | undefined,
       formats: {
-        agentSkills: {
+        agentExtensions: {
           enabled: true,
           path: 'SKILL.md',
         },
@@ -123,12 +123,12 @@ export function detectSkillFormat(repoPath: string): UnifiedSkill | null {
     };
   }
 
-  // Check for skill.json
-  const skillJsonPath = join(repoPath, 'skill.json');
-  if (existsSync(skillJsonPath)) {
-    const content = readFileSync(skillJsonPath, 'utf-8');
-    const skill = parseSkillJson(content);
-    return skill as UnifiedSkill;
+  // Check for extension.json
+  const extensionJsonPath = join(repoPath, 'extension.json');
+  if (existsSync(extensionJsonPath)) {
+    const content = readFileSync(extensionJsonPath, 'utf-8');
+    const extension = parseExtensionJson(content);
+    return extension as UnifiedExtension;
   }
 
   // Check for gemini-command.toml (Gemini CLI commands)
@@ -136,15 +136,15 @@ export function detectSkillFormat(repoPath: string): UnifiedSkill | null {
   if (existsSync(geminiTomlPath)) {
     const content = readFileSync(geminiTomlPath, 'utf-8');
     const toml = parseToml(content);
-    const skillName = basename(repoPath).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const extensionName = basename(repoPath).toLowerCase().replace(/[^a-z0-9-]/g, '-');
     
     return {
-      name: toml.name || skillName,
+      name: toml.name || extensionName,
       description: toml.description || '',
       formats: {
         geminiCommand: {
           enabled: true,
-          name: toml.name || skillName,
+          name: toml.name || extensionName,
           description: toml.description || '',
         },
       },
@@ -162,37 +162,37 @@ export function detectSkillFormat(repoPath: string): UnifiedSkill | null {
 }
 
 /**
- * Detect if a repository is a multi-skill repo (has skills/ subdirectory)
+ * Detect if a repository is a multi-extension repo (has extensions/ subdirectory)
  */
-export function detectMultiSkillRepo(repoPath: string): string[] {
-  const skillsPath = join(repoPath, 'skills');
-  if (!existsSync(skillsPath)) {
+export function detectMultiExtensionRepo(repoPath: string): string[] {
+  const extensionsPath = join(repoPath, 'extensions');
+  if (!existsSync(extensionsPath)) {
     return [];
   }
 
-  const skills: string[] = [];
-  for (const dir of readdirSync(skillsPath)) {
-    const skillPath = join(skillsPath, dir);
-    if (existsSync(join(skillPath, 'SKILL.md'))) {
-      skills.push(dir);
+  const extensions: string[] = [];
+  for (const dir of readdirSync(extensionsPath)) {
+    const extensionPath = join(extensionsPath, dir);
+    if (existsSync(join(extensionPath, 'SKILL.md'))) {
+      extensions.push(dir);
     }
   }
 
-  return skills;
+  return extensions;
 }
 
 /**
- * Filter skills based on include/exclude options
+ * Filter extensions based on include/exclude options
  */
-function filterSkills(allSkills: string[], include?: string[], exclude?: string[]): string[] {
-  let filtered = allSkills;
+function filterExtensions(allExtensions: string[], include?: string[], exclude?: string[]): string[] {
+  let filtered = allExtensions;
 
   if (include && include.length > 0) {
-    filtered = filtered.filter(s => include.includes(s));
+    filtered = filtered.filter(e => include.includes(e));
   }
 
   if (exclude && exclude.length > 0) {
-    filtered = filtered.filter(s => !exclude.includes(s));
+    filtered = filtered.filter(e => !exclude.includes(e));
   }
 
   return filtered;
@@ -250,10 +250,10 @@ function addSourceToManifest(config: AgentManagerConfig, repo: string, skillsPat
 }
 
 /**
- * Install a skill to a specific agent
+ * Install an extension to a specific agent
  */
 async function installToAgent(
-  skill: UnifiedSkill,
+  extension: UnifiedExtension,
   agentType: AgentType,
   repoPath: string,
   config: AgentManagerConfig,
@@ -272,8 +272,8 @@ async function installToAgent(
     return false;
   }
 
-  // Check if skill format is supported for this agent
-  const formats = skill.formats;
+  // Check if extension format is supported for this agent
+  const formats = extension.formats;
   let installed = false;
 
   try {
@@ -283,13 +283,13 @@ async function installToAgent(
       
       if (mcpConfig.type === 'http' && mcpConfig.url) {
         if (options.dryRun) {
-          logger.info(`[DRY RUN] Would add MCP server: ${skill.name}`);
+          logger.info(`[DRY RUN] Would add MCP server: ${extension.name}`);
         } else {
-          await adapter.addSkill({
-            name: skill.name,
+          await adapter.addExtension({
+            name: extension.name,
             type: 'mcp',
             agent: agentType,
-            description: skill.description,
+            description: extension.description,
             config: {
               url: mcpConfig.url,
               headers: mcpConfig.headers || {},
@@ -300,13 +300,13 @@ async function installToAgent(
         installed = true;
       } else if (mcpConfig.type === 'command' && mcpConfig.command) {
         if (options.dryRun) {
-          logger.info(`[DRY RUN] Would add MCP command: ${skill.name}`);
+          logger.info(`[DRY RUN] Would add MCP command: ${extension.name}`);
         } else {
-          await adapter.addSkill({
-            name: skill.name,
+          await adapter.addExtension({
+            name: extension.name,
             type: 'mcp',
             agent: agentType,
-            description: skill.description,
+            description: extension.description,
             config: {
               command: mcpConfig.command,
               args: mcpConfig.args || [],
@@ -325,9 +325,9 @@ async function installToAgent(
       
       if (agentConfig.skillsPath && !options.dryRun) {
         const destPath = join(agentConfig.skillsPath, `${geminiConfig.name}.toml`);
-        const skillContent = generateGeminiToml(skill);
+        const extensionContent = generateGeminiToml(extension);
         mkdirSync(dirname(destPath), { recursive: true });
-        writeFileSync(destPath, skillContent);
+        writeFileSync(destPath, extensionContent);
         logger.success(`Added Gemini command: ${geminiConfig.name}`);
         installed = true;
       } else if (options.dryRun) {
@@ -336,18 +336,18 @@ async function installToAgent(
       }
     }
 
-    // Install to OpenCode (skills)
-    if (agentType === 'opencode' && formats.agentSkills?.enabled) {
+    // Install to OpenCode (extensions)
+    if (agentType === 'opencode' && formats.agentExtensions?.enabled) {
       const agentConfig = config.agents['opencode'];
       
       if (agentConfig.skillsPath) {
-        const skillMdPath = join(repoPath, formats.agentSkills.path || 'SKILL.md');
+        const skillMdPath = join(repoPath, formats.agentExtensions.path || 'SKILL.md');
         if (existsSync(skillMdPath)) {
-          // For OpenCode, we use symlinks (like skill-manager-v2)
-          const targetPath = join(agentConfig.skillsPath, skill.name);
+          // For OpenCode, we use symlinks (like agent-manager-v2)
+          const targetPath = join(agentConfig.skillsPath, extension.name);
           
           if (options.dryRun) {
-            logger.info(`[DRY RUN] Would symlink ${skill.name} to ${targetPath}`);
+            logger.info(`[DRY RUN] Would symlink ${extension.name} to ${targetPath}`);
           } else {
             // Remove existing symlink if present
             if (existsSync(targetPath)) {
@@ -358,11 +358,49 @@ async function installToAgent(
               }
             }
             symlinkSync(skillMdPath, targetPath);
-            logger.success(`Added OpenCode skill: ${skill.name}`);
+            logger.success(`Added OpenCode extension: ${extension.name}`);
           }
           installed = true;
         }
       }
+    }
+
+    // Install to Cursor (Agent Extensions)
+    if (agentType === 'cursor' && formats.agentExtensions?.enabled) {
+      const agentConfig = config.agents['cursor'];
+      
+      if (options.dryRun) {
+        logger.info(`[DRY RUN] Would add Agent Extension ${extension.name} to Cursor`);
+      } else {
+        await adapter.addExtension({
+          name: extension.name,
+          type: 'skill',
+          agent: 'cursor',
+          description: extension.description,
+          path: repoPath,
+        });
+        logger.success(`Added Agent Extension to Cursor: ${extension.name}`);
+      }
+      installed = true;
+    }
+
+    // Install to Claude Code (Agent Extensions - compatible with Cursor)
+    if (agentType === 'claude-code' && formats.agentExtensions?.enabled) {
+      const agentConfig = config.agents['claude-code'];
+      
+      if (options.dryRun) {
+        logger.info(`[DRY RUN] Would add Agent Extension ${extension.name} to Claude Code`);
+      } else {
+        await adapter.addExtension({
+          name: extension.name,
+          type: 'skill',
+          agent: 'claude-code',
+          description: extension.description,
+          path: repoPath,
+        });
+        logger.success(`Added Agent Extension to Claude Code: ${extension.name}`);
+      }
+      installed = true;
     }
 
   } catch (error) {
@@ -378,14 +416,14 @@ async function installToAgent(
 /**
  * Generate Gemini CLI command TOML
  */
-function generateGeminiToml(skill: UnifiedSkill): string {
+function generateGeminiToml(extension: UnifiedExtension): string {
   const lines = [
-    `description = "${skill.description}"`,
+    `description = "${extension.description}"`,
   ];
 
-  if (skill.content?.prompt) {
+  if (extension.content?.prompt) {
     lines.push(`prompt = """`);
-    lines.push(skill.content.prompt);
+    lines.push(extension.content.prompt);
     lines.push(`"""`);
   }
 
@@ -393,23 +431,23 @@ function generateGeminiToml(skill: UnifiedSkill): string {
 }
 
 /**
- * Main function to add a skill from repository
+ * Main function to add an extension from repository
  */
-export async function addSkill(
+export async function addExtension(
   repo: string,
   config: AgentManagerConfig,
   options: AddOptions
 ): Promise<AddResult> {
   const result: AddResult = {
     success: false,
-    skill: basename(repo),
+    extension: basename(repo),
     installedTo: [],
   };
 
   // Determine target agents
   const targetAgents = options.to || Object.keys(config.agents) as AgentType[];
   
-  logger.info(`Adding skill from ${repo}...`);
+  logger.info(`Adding extension from ${repo}...`);
   logger.info(`Target agents: ${targetAgents.join(', ')}`);
 
   // Create temp directory for cloning
@@ -432,35 +470,35 @@ export async function addSkill(
       commit = await getCurrentCommit(clonePath);
     }
 
-    // Check for multi-skill repo (skills/ subdirectory)
-    const multiSkills = detectMultiSkillRepo(clonePath);
-    const isMultiSkill = multiSkills.length > 0;
+    // Check for multi-extension repo (extensions/ subdirectory)
+    const multiExtensions = detectMultiExtensionRepo(clonePath);
+    const isMultiExtension = multiExtensions.length > 0;
 
-    if (isMultiSkill) {
-      // Multi-skill repo: add to manifest for OpenCode
-      logger.info(`Detected multi-skill repo with ${multiSkills.length} skills`);
+    if (isMultiExtension) {
+      // Multi-extension repo: add to manifest for OpenCode
+      logger.info(`Detected multi-extension repo with ${multiExtensions.length} extensions`);
       
-      // Filter skills based on include/exclude
-      const filteredSkills = filterSkills(multiSkills, options.include, options.exclude);
+      // Filter extensions based on include/exclude
+      const filteredExtensions = filterExtensions(multiExtensions, options.include, options.exclude);
       
-      if (filteredSkills.length > 0) {
-        logger.info(`Installing ${filteredSkills.length} skills: ${filteredSkills.join(', ')}`);
+      if (filteredExtensions.length > 0) {
+        logger.info(`Installing ${filteredExtensions.length} extensions: ${filteredExtensions.join(', ')}`);
         
         // Add source to agent-manager manifest
         if (!options.dryRun) {
-          addSourceToManifest(config.home, repo, 'skills', 'main', {
+          addSourceToManifest(config.home, repo, 'extensions', 'main', {
             include: options.include,
             exclude: options.exclude,
           });
         }
 
-        // Install each skill individually
-        for (const skillName of filteredSkills) {
-          const skillPath = join(clonePath, 'skills', skillName);
-          const skill = detectSkillFormat(skillPath);
+        // Install each extension individually
+        for (const extensionName of filteredExtensions) {
+          const extensionPath = join(clonePath, 'extensions', extensionName);
+          const extension = detectExtensionFormat(extensionPath);
           
-          if (skill) {
-            result.skill = skill.name;
+          if (extension) {
+            result.extension = extension.name;
             
             for (const agentType of targetAgents) {
               if (!config.agents[agentType].enabled) continue;
@@ -469,18 +507,18 @@ export async function addSkill(
                 continue;
               }
               
-              const installed = await installToAgent(skill, agentType, skillPath, config, options);
+              const installed = await installToAgent(extension, agentType, extensionPath, config, options);
               if (installed) {
                 result.installedTo.push(agentType);
                 
                 // Track in manifest
                 if (!options.dryRun) {
-                  addSkillToManifest(config.home, skill.name, agentType, {
-                    description: skill.description,
+                  addExtensionToManifest(config.home, extension.name, agentType, {
+                    description: extension.description,
                     repo,
                     commit,
-                    path: 'skills',
-                    skillPath,
+                    path: 'extensions',
+                    extensionPath,
                   });
                 }
               }
@@ -490,27 +528,27 @@ export async function addSkill(
         
         if (targetAgents.includes('opencode')) {
           result.installedTo.push('opencode');
-          logger.info('Run "agent-manager sync" to sync OpenCode skills');
+          logger.info('Run "agent-manager sync" to sync OpenCode extensions');
         }
       } else {
-        result.error = 'No skills match the include/exclude filters';
+        result.error = 'No extensions match the include/exclude filters';
         return result;
       }
     } else {
-      // Single skill repo: install directly
-      const skill = detectSkillFormat(clonePath);
+      // Single extension repo: install directly
+      const extension = detectExtensionFormat(clonePath);
       
-      if (!skill) {
-        result.error = 'No valid skill format found (SKILL.md, skill.json, or gemini-command.toml)';
+      if (!extension) {
+        result.error = 'No valid extension format found (SKILL.md, extension.json, or gemini-command.toml)';
         logger.error(result.error);
         return result;
       }
 
-      result.skill = skill.name;
-      logger.success(`Detected skill: ${skill.name}`);
+      result.extension = extension.name;
+      logger.success(`Detected extension: ${extension.name}`);
       
-      if (skill.description) {
-        logger.info(`Description: ${skill.description}`);
+      if (extension.description) {
+        logger.info(`Description: ${extension.description}`);
       }
 
       // Get commit/tag info
@@ -526,18 +564,18 @@ export async function addSkill(
           continue;
         }
 
-        const installed = await installToAgent(skill, agentType, clonePath, config, options);
+        const installed = await installToAgent(extension, agentType, clonePath, config, options);
         
         if (installed) {
           result.installedTo.push(agentType);
           
           // Track in manifest
           if (!options.dryRun) {
-            addSkillToManifest(config.home, skill.name, agentType, {
-              description: skill.description,
+            addExtensionToManifest(config.home, extension.name, agentType, {
+              description: extension.description,
               repo,
               commit,
-              skillPath: clonePath,
+              extensionPath: clonePath,
             });
           }
         }
@@ -549,13 +587,13 @@ export async function addSkill(
     if (result.success) {
       logger.success(`Successfully installed to ${result.installedTo.length} agent(s)`);
     } else {
-      result.error = 'Skill format not compatible with any target agent';
+      result.error = 'Extension format not compatible with any target agent';
       logger.warn(result.error);
     }
 
   } catch (error) {
     result.error = String(error);
-    logger.error(`Failed to add skill: ${error}`);
+    logger.error(`Failed to add extension: ${error}`);
   } finally {
     // Cleanup temp directory
     if (!options.dryRun && existsSync(tempDir)) {

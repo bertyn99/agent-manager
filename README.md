@@ -1,21 +1,23 @@
 # Agent Manager
 
-Universal CLI tool to manage skills, agents, and commands across multiple AI coding assistants.
+Universal CLI tool to manage extensions (MCP servers, skills, commands) across multiple AI coding assistants.
 
 ## Supported Agents
 
-- **Claude Code** - MCP servers via `~/.claude/settings.json`
-- **Cursor** - MCP servers via `~/.cursor/mcp.json`
-- **Gemini CLI** - Commands, agents, and MCP via `~/.gemini/`
-- **OpenCode** - Skills via `~/.config/opencode/skill/`
+| Agent | MCP Support | Commands | Skills |
+|-------|-------------|----------|--------|
+| **Claude Code** | ✅ via `~/.claude/settings.json` | ❌ | ❌ |
+| **Cursor** | ✅ via `~/.cursor/mcp.json` | ❌ | ❌ |
+| **Gemini CLI** | ✅ via `~/.gemini/settings.json` | ✅ via `~/.gemini/commands/` | ❌ |
+| **OpenCode** | ✅ via `~/.config/opencode/opencode.jsonc` | ❌ | ✅ via `~/.config/opencode/skill/` |
 
 ## Installation
 
 ```bash
 # From source
 cd agent-manager
-npm install
-npm run build
+pnpm install
+pnpm build
 
 # Symlink to PATH
 ln -s $(pwd)/dist/cli/index.js /usr/local/bin/agent-manager
@@ -27,17 +29,22 @@ ln -s $(pwd)/dist/cli/index.js /usr/local/bin/agent-manager
 # Detect installed agents
 agent-manager detect
 
-# List all skills across agents
+# List all extensions across agents
 agent-manager list
 
-# Add a skill from repository
-agent-manager add https://github.com/vercel-labs/agent-browser/tree/main/skills/agent-browser
+# Add an extension from repository
+agent-manager add https://github.com/user/extension-repo
 
-# Sync skills to all agents
+# Manage MCP servers directly
+agent-manager mcp list
+agent-manager mcp add my-server --transport stdio --command "npx -y @modelcontextprotocol/server-filesystem /tmp"
+
+# Manage Gemini CLI commands
+agent-manager command list
+agent-manager command add my-command --prompt "You are helpful" --output text
+
+# Sync extensions to all agents
 agent-manager sync
-
-# Upgrade a skill
-agent-manager upgrade agent-browser
 ```
 
 ## Commands
@@ -49,7 +56,7 @@ agent-manager detect
 ```
 
 ### list
-List all skills across all detected agents.
+List all extensions across all detected agents.
 ```bash
 agent-manager list           # Summary
 agent-manager list --json    # JSON output
@@ -57,88 +64,117 @@ agent-manager list --verbose # Detailed output
 ```
 
 ### add
-Add a skill/agent/command from a repository.
+Add an extension from a repository.
 ```bash
 agent-manager add <repo>                   # Add to all compatible agents
-agent-manager add <repo> --to claude       # Add to specific agent
-agent-manager add <repo> --skill-only     # Add only SKILL.md format
-agent-manager add <repo> --mcp-only       # Add only MCP format
-agent-manager add <repo> --gemini-only    # Add only Gemini command
+agent-manager add <repo> --to claude-code  # Add to specific agent
+agent-manager add <repo> --nested          # Repository has nested extensions
+agent-manager add <repo> --include ext1,ext2  # Include specific extensions
+agent-manager add <repo> --exclude ext3,ext4  # Exclude specific extensions
 ```
 
 ### remove
-Remove a skill from agents.
+Remove an extension from agents.
 ```bash
-agent-manager remove <skill-name>          # Remove from all agents
-agent-manager remove <skill-name> --from cursor  # Remove from specific agent
+agent-manager remove <extension-name>      # Remove from all agents
+agent-manager remove <extension-name> --from cursor  # Remove from specific agent
 ```
 
 ### sync
-Synchronize skills across all agents.
+Synchronize extensions across all agents.
 ```bash
 agent-manager sync            # Apply changes
 agent-manager sync --dry-run  # Preview changes
 ```
 
 ### upgrade
-Upgrade a skill by gathering latest information.
+Upgrade an extension to the latest version.
 ```bash
-agent-manager upgrade <skill-name>         # Upgrade using OpenCode agent
-agent-manager upgrade <skill-name> --all   # Upgrade for all agents
+agent-manager upgrade <extension-name>  # Upgrade specific extension
+agent-manager upgrade <extension-name> --all  # Upgrade for all agents
+agent-manager upgrade --all  # Upgrade all extensions
 ```
 
-### validate
-Validate skill format against Agent Skills spec.
+### mcp
+Manage MCP servers directly (Gemini CLI, Claude Code, Cursor, OpenCode).
 ```bash
-agent-manager validate           # Validate all skills
-agent-manager validate <skill>   # Validate specific skill
+# List all MCP servers
+agent-manager mcp list
+
+# Add an MCP server
+agent-manager mcp add <name> --transport stdio --command "npx -y server-name"
+agent-manager mcp add <name> --transport http --url https://mcp.example.com
+agent-manager mcp add <name> --transport sse --url https://mcp.example.com/sse
+agent-manager mcp add <name> --transport websocket --url wss://mcp.example.com/ws
+
+# Remove an MCP server
+agent-manager mcp remove <name>
+agent-manager mcp remove <name> --from gemini-cli  # Remove from specific agent
+```
+
+### command
+Manage Gemini CLI commands.
+```bash
+# List all commands
+agent-manager command list
+
+# Add a command
+agent-manager command add <name> --prompt "You are helpful"
+agent-manager command add <name> --description "A useful command" --prompt "You are helpful"
+agent-manager command add <name> --output json --args "--verbose,--debug"
+agent-manager command add <name> --total-budget 0.5
+
+# Remove a command
+agent-manager command remove <name>
 ```
 
 ### doctor
-Run health checks on the manager.
+Run health checks on the CLI and environment.
 ```bash
 agent-manager doctor
 ```
 
-## Configuration
-
-### Unified Manifest Format
-
-Skills can be defined with a unified manifest that maps to multiple agent formats:
-
-```yaml
-# unified-skill.yaml
-name: agent-browser
-description: Headless browser automation for AI agents
-
-formats:
-  agent-skills:
-    enabled: true
-    path: agent-browser/SKILL.md
-    
-  mcp:
-    enabled: true
-    type: http
-    url: https://github.com/vercel-labs/agent-browser/skills/agent-browser
-    
-  gemini-command:
-    enabled: true
-    name: browser-automation
+### migrate
+Migrate from skill-manager to agent-manager.
+```bash
+agent-manager migrate
 ```
+
+### manifest
+Show or manage the agent-manager manifest.
+```bash
+agent-manager manifest           # Show manifest
+agent-manager manifest --json    # JSON output
+agent-manager manifest --import ~/.config/opencode/skills.yaml  # Import from OpenCode
+agent-manager manifest --clear   # Clear manifest (use with caution)
+```
+
+## MCP Transport Types
+
+| Type | Description | Required Options |
+|------|-------------|------------------|
+| `stdio` | Standard I/O process | `--command` |
+| `http` | HTTP endpoint | `--url` |
+| `sse` | Server-Sent Events | `--url` or `--sse-endpoint` |
+| `websocket` | WebSocket connection | `--url` or `--ws-endpoint` |
+
+### Security Warnings
+
+When adding MCP servers or commands, agent-manager will warn about:
+
+- **Unencrypted connections**: Using `http://` instead of `https://`
+- **Shell commands in prompts**: `!{command}` syntax that executes shell commands
+- **File injection**: `@{/path/to/file}` syntax that reads files into context
+- **Dangerous commands**: Commands containing `rm -rf` or similar operations
+- **Elevated privileges**: Commands using `sudo` or admin operations
+
+## Configuration
 
 ### Environment Variables
 
 - `AGENT_MANAGER_HOME`: Override config directory (default: `~/.config/agent-manager`)
 - `AGENT_MANAGER_DRY_RUN`: Always run in dry-run mode
 - `AGENT_MANAGER_VERBOSE`: Enable verbose output
-
-## Migration from skill-manager
-
-```bash
-agent-manager migrate skill-manager
-```
-
-This imports your existing skills from `~/.config/opencode/skills.yaml`.
 
 ## Architecture
 

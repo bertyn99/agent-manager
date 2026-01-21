@@ -26,11 +26,13 @@ export const UnifiedSkillSchema = z.object({
     
     mcp: z.object({
       enabled: z.boolean(),
-      type: z.enum(['http', 'command']),
+      type: z.enum(['http', 'command', 'sse', 'websocket']),
       url: z.string().url().optional(),
       command: z.string().optional(),
       args: z.array(z.string()).optional(),
       headers: z.record(z.string()).optional(),
+      sseEndpoint: z.string().optional(),
+      websocketEndpoint: z.string().optional(),
     }).optional(),
     
     geminiCommand: z.object({
@@ -80,8 +82,26 @@ export const GeminiCommandSchema = z.object({
   prompt: z.string().optional(),
   args: z.array(z.string()).optional(),
   totalBudget: z.number().optional(),
-  output: z.string().optional(),
+  output: z.enum(['text', 'json', 'streaming']).optional(),
 });
+
+// Gemini command validation with special feature detection
+export interface GeminiCommandValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  data?: {
+    description: string;
+    prompt?: string;
+    args?: string[];
+    totalBudget?: number;
+    output?: 'text' | 'json' | 'streaming';
+  };
+}
+
+// Special feature patterns in Gemini commands
+const SHELL_COMMAND_PATTERN = /!\{[^}]+\}/g;
+const FILE_INJECTION_PATTERN = /@\{[^}]+\}/g;
 
 // Manifest source schema
 export const ManifestSourceSchema = z.object({
@@ -140,17 +160,43 @@ export function validateUnifiedSkill(
 
 export function validateGeminiCommand(
   toml: Record<string, unknown>
-): { valid: boolean; errors: string[] } {
+): GeminiCommandValidation {
   const result = GeminiCommandSchema.safeParse(toml);
   
-  if (result.success) {
-    return { valid: true, errors: [] };
+  if (!result.success) {
+    return {
+      valid: false,
+      errors: result.error.errors.map(e =>
+        `${e.path.join('.')}: ${e.message}`
+      ),
+      warnings: [],
+    };
   }
-  
+
+  // Detect special features and generate warnings
+  const warnings: string[] = [];
+  const prompt = result.data.prompt;
+
+  if (prompt) {
+    const shellMatches = prompt.match(SHELL_COMMAND_PATTERN);
+    if (shellMatches) {
+      warnings.push(
+        `Shell command (${shellMatches[0]}) detected - will require user confirmation before execution`
+      );
+    }
+
+    const fileMatches = prompt.match(FILE_INJECTION_PATTERN);
+    if (fileMatches) {
+      warnings.push(
+        `File injection (${fileMatches[0]}) detected - files will be read and included in context`
+      );
+    }
+  }
+
   return {
-    valid: false,
-    errors: result.error.errors.map(e =>
-      `${e.path.join('.')}: ${e.message}`
-    ),
+    valid: true,
+    errors: [],
+    warnings,
+    data: result.data,
   };
 }

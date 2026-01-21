@@ -104,6 +104,9 @@ export function findSkill(manifest: AgentManagerManifest, skillName: string): Ma
   return manifest.skills.find(s => s.name === skillName);
 }
 
+// Alias for findExtension
+export const findExtension = findSkill;
+
 /**
  * Add or update a skill in manifest
  */
@@ -154,6 +157,9 @@ export function addSkillToManifest(
   writeManifest(configHome, manifest);
 }
 
+// Alias for addExtension
+export const addExtensionToManifest = addSkillToManifest;
+
 /**
  * Remove a skill from manifest for a specific agent
  */
@@ -190,8 +196,11 @@ export function removeSkillFromManifest(
   return true;
 }
 
+// Alias for removeExtension
+export const removeExtensionFromManifest = removeSkillFromManifest;
+
 /**
- * Add a source to manifest (for multi-skill repos)
+ * Add a source to manifest (for multi-extension repos)
  */
 export function addSourceToManifest(
   configHome: string,

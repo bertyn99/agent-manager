@@ -1,21 +1,29 @@
 {
   "name": "agent-manager",
-  "version": "2.0.0",
-  "description": "Universal CLI to manage skills, agents, and commands across multiple AI coding assistants",
+  "version": "1.0.0",
+  "description": "Universal CLI to manage skills, agents, and commands across multiple AI coding assistants (Claude Code, Cursor, Gemini CLI, OpenCode, VS Code Copilot)",
   "type": "module",
-  "main": "./dist/cli/index.js",
+  "main": "./dist/index.js",
   "bin": {
-    "agent-manager": "./dist/cli/index.js"
+    "agent-manager": "./dist/index.js",
+    "ag-manager": "./dist/index.js",
+    "agm": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "scripts",
+    "package.json",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
     "test": "vitest",
-    "test:unit": "vitest --run --testNamePattern='unit'",
-    "test:integration": "vitest --run --testNamePattern='integration'",
     "lint": "oxlint --import --jsx --jsx-a11y --typescript",
     "format": "oxfmt --write src/",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm run build",
+    "setup": "node scripts/setup.js",
+    "postinstall": "node scripts/setup.js"
   },
   "keywords": [
     "ai",
@@ -27,10 +35,19 @@
     "mcp",
     "copilot",
     "codex",
-    "unjs"
+    "opencode",
+    "cli"
   ],
-  "author": "",
+  "author": "bertyn99",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bertyn99/agent-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bertyn99/agent-manager/issues"
+  },
+  "homepage": "https://github.com/bertyn99/agent-manager#readme",
   "dependencies": {
     "citty": "^0.1.6",
     "c12": "^3.3.3",
@@ -45,10 +62,7 @@
     "fs-extra": "^11.2.0",
     "simple-git": "^3.27.0",
     "zod": "^3.24.2",
-    "js-yaml": "^4.1.0",
-    "oxlint": "^1.41.0",
-    "oxfmt": "^0.26.0",
-    "tsdown": "^0.10.2"
+    "js-yaml": "^4.1.0"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
@@ -57,8 +71,10 @@
     "typescript": "^5.7.3",
     "vitest": "^3.0.6",
     "@oxfmt/linux-x64-gnu": "^0.26.0",
-    "@oxlint-tsgolint/linux-x64": "^0.11.1",
-    "tsdown": "^0.10.2"
+    "@oxlint-tsgolint/linux-x64": "0.11.1",
+    "tsdown": "^0.10.2",
+    "oxlint": "^1.41.0",
+    "oxfmt": "^0.26.0"
   },
   "engines": {
     "node": ">=18.0.0"

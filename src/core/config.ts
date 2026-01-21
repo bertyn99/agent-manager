@@ -52,10 +52,12 @@ export function getDefaultConfig(): AgentManagerConfig {
       'claude-code': {
         enabled: true,
         configPath: join(homedir(), '.claude', 'settings.json'),
+        skillsPath: join(homedir(), '.claude', 'skills'),
       },
       'cursor': {
         enabled: true,
         configPath: join(homedir(), '.cursor', 'mcp.json'),
+        skillsPath: join(homedir(), '.cursor', 'skills'),
       },
       'gemini-cli': {
         enabled: true,

@@ -1,11 +1,11 @@
-// Skill Remover - Handles removing skills from different agents
+// Extension Remover - Handles removing extensions from different agents
 
 import { existsSync, unlinkSync } from 'fs-extra';
 import { join } from 'pathe';
 import { logger } from '../utils/logger.js';
 import { createAgentRegistry } from '../adapters/index.js';
 import type { AgentManagerConfig, AgentType } from '../core/types.js';
-import { removeSkillFromManifest } from './manifest.js';
+import { removeExtensionFromManifest } from './manifest.js';
 
 export interface RemoveOptions {
   from?: AgentType[];
@@ -14,29 +14,29 @@ export interface RemoveOptions {
 
 export interface RemoveResult {
   success: boolean;
-  skill: string;
+  extension: string;
   removedFrom: AgentType[];
   error?: string;
 }
 
 /**
- * Remove a skill from agents
+ * Remove an extension from agents
  */
-export async function removeSkill(
-  skillName: string,
+export async function removeExtension(
+  extensionName: string,
   config: AgentManagerConfig,
   options: RemoveOptions
 ): Promise<RemoveResult> {
   const result: RemoveResult = {
     success: false,
-    skill: skillName,
+    extension: extensionName,
     removedFrom: [],
   };
 
   // Determine target agents
   const targetAgents = options.from || Object.keys(config.agents) as AgentType[];
   
-  logger.info(`Removing skill "${skillName}"...`);
+  logger.info(`Removing extension "${extensionName}"...`);
   logger.info(`Target agents: ${targetAgents.join(', ')}`);
 
   // Remove from each target agent
@@ -46,12 +46,12 @@ export async function removeSkill(
       continue;
     }
 
-    const removed = await removeFromAgent(skillName, agentType, config, options);
+    const removed = await removeFromAgent(extensionName, agentType, config, options);
     
     if (removed) {
       result.removedFrom.push(agentType);
       // Remove from manifest
-      removeSkillFromManifest(config.home, skillName, agentType);
+      removeExtensionFromManifest(config.home, extensionName, agentType);
     }
   }
 
@@ -60,7 +60,7 @@ export async function removeSkill(
   if (result.success) {
     logger.success(`Successfully removed from ${result.removedFrom.length} agent(s)`);
   } else {
-    result.error = 'Skill not found in any target agent';
+    result.error = 'Extension not found in any target agent';
     logger.warn(result.error);
   }
 
@@ -68,10 +68,10 @@ export async function removeSkill(
 }
 
 /**
- * Remove a skill from a specific agent
+ * Remove an extension from a specific agent
  */
 async function removeFromAgent(
-  skillName: string,
+  extensionName: string,
   agentType: AgentType,
   config: AgentManagerConfig,
   options: RemoveOptions
@@ -91,17 +91,17 @@ async function removeFromAgent(
 
   try {
     // Try to remove from adapter
-    await adapter.removeSkill(skillName);
+    await adapter.removeExtension(extensionName);
     logger.success(`Removed from ${agentType}`);
     return true;
   } catch {
-    // Check if it's a file-based skill (like OpenCode or Gemini CLI)
+    // Check if it's a file-based extension (like OpenCode or Gemini CLI)
     if (agentType === 'opencode') {
       const agentConfig = config.agents['opencode'];
       if (agentConfig.skillsPath) {
-        const skillPath = join(agentConfig.skillsPath, `${skillName}.md`);
-        if (existsSync(skillPath)) {
-          unlinkSync(skillPath);
+        const extensionPath = join(agentConfig.skillsPath, `${extensionName}.md`);
+        if (existsSync(extensionPath)) {
+          unlinkSync(extensionPath);
           logger.success(`Removed from ${agentType}`);
           return true;
         }
@@ -111,9 +111,9 @@ async function removeFromAgent(
     if (agentType === 'gemini-cli') {
       const agentConfig = config.agents['gemini-cli'];
       if (agentConfig.skillsPath) {
-        const skillPath = join(agentConfig.skillsPath, `${skillName}.toml`);
-        if (existsSync(skillPath)) {
-          unlinkSync(skillPath);
+        const extensionPath = join(agentConfig.skillsPath, `${extensionName}.toml`);
+        if (existsSync(extensionPath)) {
+          unlinkSync(extensionPath);
           logger.success(`Removed from ${agentType}`);
           return true;
         }

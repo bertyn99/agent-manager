@@ -162,72 +162,72 @@ describe('Git Utilities', () => {
   });
 });
 
-describe('Skill Installer', () => {
+describe('Extension Installer', () => {
   it('should export required functions', async () => {
     const { 
-      parseSkillMd, 
-      parseSkillJson, 
-      detectSkillFormat,
-      addSkill,
+      parseExtensionMd, 
+      parseExtensionJson, 
+      detectExtensionFormat,
+      addExtension,
     } = await import('../core/skill-installer.js');
     
-    expect(typeof parseSkillMd).toBe('function');
-    expect(typeof parseSkillJson).toBe('function');
-    expect(typeof detectSkillFormat).toBe('function');
-    expect(typeof addSkill).toBe('function');
+    expect(typeof parseExtensionMd).toBe('function');
+    expect(typeof parseExtensionJson).toBe('function');
+    expect(typeof detectExtensionFormat).toBe('function');
+    expect(typeof addExtension).toBe('function');
   });
 
-  it('should parse SKILL.md frontmatter', async () => {
-    const { parseSkillMd } = await import('../core/skill-installer.js');
+  it('should parse EXTENSION.md frontmatter', async () => {
+    const { parseExtensionMd } = await import('../core/skill-installer.js');
     
     const content = `---
-name: test-skill
-description: A test skill
+name: test-extension
+description: A test extension
 version: 1.0.0
 author: Test Author
 ---
 
-# Test Skill
-This is a test skill.
+# Test Extension
+This is a test extension.
 `;
     
-    const frontmatter = parseSkillMd(content);
+    const frontmatter = parseExtensionMd(content);
     
-    expect(frontmatter.name).toBe('test-skill');
-    expect(frontmatter.description).toBe('A test skill');
+    expect(frontmatter.name).toBe('test-extension');
+    expect(frontmatter.description).toBe('A test extension');
     expect(frontmatter.version).toBe('1.0.0');
     expect(frontmatter.author).toBe('Test Author');
   });
 
-  it('should parse skill.json', async () => {
-    const { parseSkillJson } = await import('../core/skill-installer.js');
+  it('should parse extension.json', async () => {
+    const { parseExtensionJson } = await import('../core/skill-installer.js');
     
     const json = JSON.stringify({
-      name: 'test-skill',
-      description: 'A test skill',
+      name: 'test-extension',
+      description: 'A test extension',
     });
     
-    const result = parseSkillJson(json);
+    const result = parseExtensionJson(json);
     
-    expect(result.name).toBe('test-skill');
-    expect(result.description).toBe('A test skill');
+    expect(result.name).toBe('test-extension');
+    expect(result.description).toBe('A test extension');
   });
 });
 
-describe('Skill Remover', () => {
-  it('should export removeSkill function', async () => {
-    const { removeSkill } = await import('../core/skill-remover.js');
+describe('Extension Remover', () => {
+  it('should export removeExtension function', async () => {
+    const { removeExtension } = await import('../core/skill-remover.js');
     
-    expect(typeof removeSkill).toBe('function');
+    expect(typeof removeExtension).toBe('function');
   });
 });
 
-describe('Skill Sync', () => {
+describe('Extension Sync', () => {
   it('should export sync and upgrade functions', async () => {
-    const { syncSkills, upgradeSkill, upgradeAllSkills } = await import('../core/skill-sync.js');
+    const { syncExtensions, upgradeExtension, upgradeAllExtensions } = await import('../core/skill-sync.js');
     
-    expect(typeof syncSkills).toBe('function');
-    expect(typeof upgradeSkill).toBe('function');
-    expect(typeof upgradeAllSkills).toBe('function');
+    expect(typeof syncExtensions).toBe('function');
+    expect(typeof upgradeExtension).toBe('function');
+    expect(typeof upgradeAllExtensions).toBe('function');
   });
 });

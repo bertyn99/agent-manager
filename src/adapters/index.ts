@@ -1,4 +1,4 @@
-import { AgentAdapter, AgentType, DetectedAgent, Skill } from '../types.js';
+import { AgentAdapter, AgentType, DetectedAgent, Extension } from '../types.js';
 import { AgentManagerConfig } from '../config.js';
 import { ClaudeAdapter } from './ClaudeAdapter.js';
 import { CursorAdapter } from './CursorAdapter.js';
@@ -7,7 +7,7 @@ import { OpenCodeAdapter } from './OpenCodeAdapter.js';
 
 export interface AgentRegistry {
   detect(): DetectedAgent[];
-  listAllSkills(): Promise<Skill[]>;
+  listAllExtensions(): Promise<Extension[]>;
   getAdapter(type: AgentType): AgentAdapter | undefined;
   getDetectedAgents(): DetectedAgent[];
 }
@@ -34,16 +34,16 @@ export function createAgentRegistry(config: AgentManagerConfig): AgentRegistry {
       return detected;
     },
     
-    async listAllSkills(): Promise<Skill[]> {
-      const skills: Skill[] = [];
+    async listAllExtensions(): Promise<Extension[]> {
+      const extensions: Extension[] = [];
       
       for (const adapter of adapters.values()) {
         if (adapter.detect()) {
-          skills.push(...(await adapter.listSkills()));
+          extensions.push(...(await adapter.listExtensions()));
         }
       }
       
-      return skills;
+      return extensions;
     },
     
     getAdapter(type: AgentType): AgentAdapter | undefined {
@@ -72,7 +72,7 @@ ClaudeAdapter.prototype.getAgentInfoSync = function() {
     name: 'Claude Code',
     installed,
     configPath: agentConfig.configPath,
-    skills: [],
+    extensions: [],
   };
 };
 
@@ -84,7 +84,7 @@ CursorAdapter.prototype.getAgentInfoSync = function() {
     name: 'Cursor',
     installed,
     configPath: agentConfig.configPath,
-    skills: [],
+    extensions: [],
   };
 };
 
@@ -97,7 +97,7 @@ GeminiAdapter.prototype.getAgentInfoSync = function() {
     installed,
     configPath: agentConfig.configPath,
     skillsPath: agentConfig.skillsPath,
-    skills: [],
+    extensions: [],
   };
 };
 
@@ -110,6 +110,6 @@ OpenCodeAdapter.prototype.getAgentInfoSync = function() {
     installed,
     configPath: agentConfig.configPath,
     skillsPath: agentConfig.skillsPath,
-    skills: [],
+    extensions: [],
   };
 };

@@ -11,17 +11,36 @@ import {
 } from 'fs-extra';
 import { join, dirname } from 'pathe';
 import { load as yamlLoad } from 'js-yaml';
-import { AgentAdapter, AgentType, DetectedAgent, Skill } from '../types.js';
+import { AgentAdapter, AgentType, DetectedAgent, Extension } from '../types.js';
 import { AgentManagerConfig } from '../config.js';
+import { transportValidator } from '../core/transport-validator.js';
+import { logger } from '../utils/logger.js';
+
+interface OpenCodeMCPConfig {
+  [serverName: string]: {
+    type?: string;
+    url?: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    enabled?: boolean;
+  };
+}
+
+interface OpenCodeConfigFile {
+  mcp?: OpenCodeMCPConfig;
+  [key: string]: unknown;
+}
 
 /**
  * OpenCode Adapter (formerly skill-manager)
  *
- * Manages skills via:
+ * Manages extensions via:
  * - SKILL.md files in ~/.config/opencode/skill/
+ * - MCP servers in ~/.config/opencode/opencode.json
  * - skills.yaml manifest in ~/.config/opencode/
- * - Symlinks to vendor directories (vendor skills)
- * - Directories for customized/local skills
+ * - Symlinks to vendor directories (vendor extensions)
+ * - Directories for customized/local extensions
  */
 export class OpenCodeAdapter implements AgentAdapter {
   readonly type: AgentType = 'opencode';
@@ -45,7 +64,51 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   /**
-   * Read and parse the skills.yaml manifest
+   * Get the OpenCode config directory
+   */
+  getConfigDir(): string {
+    return dirname(this.config.agents['opencode'].configPath);
+  }
+
+  /**
+   * Get the MCP config file path (opencode.json)
+   */
+  getMCPConfigPath(): string {
+    return join(this.getConfigDir(), 'opencode.json');
+  }
+
+  /**
+   * Read and parse opencode.json (supports JSONC with comments)
+   */
+  readOpenCodeConfig(): OpenCodeConfigFile | null {
+    const mcpPath = this.getMCPConfigPath();
+    if (!existsSync(mcpPath)) {
+      return null;
+    }
+
+    try {
+      const content = readFileSync(mcpPath, 'utf-8');
+      // Parse JSONC (allow comments) - only remove // at start of line (with optional whitespace)
+      const jsonContent = content
+        .replace(/^\s*\/\/.*$/gm, '')  // Remove single-line comments only at line start
+        .replace(/\/\*[\s\S]*?\*\//g, '');  // Remove multi-line comments
+      return JSON.parse(jsonContent) as OpenCodeConfigFile;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Write opencode.json
+   */
+  writeOpenCodeConfig(config: OpenCodeConfigFile): void {
+    const mcpPath = this.getMCPConfigPath();
+    mkdirSync(dirname(mcpPath), { recursive: true });
+    writeFileSync(mcpPath, JSON.stringify(config, null, 2));
+  }
+
+  /**
+   * Read and parse the extensions.yaml manifest
    */
   readManifest(): Record<string, unknown> | null {
     const manifestPath = this.getManifestPath();
@@ -95,10 +158,10 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   /**
-   * Read and parse the .upstream file for customized skills
+   * Read and parse the .upstream file for customized extensions
    */
-  readUpstreamFile(skillPath: string): { source: string; commit: string; customizedAt: string } | null {
-    const upstreamPath = join(skillPath, '.upstream');
+  readUpstreamFile(extensionPath: string): { source: string; commit: string; customizedAt: string } | null {
+    const upstreamPath = join(extensionPath, '.upstream');
     if (!existsSync(upstreamPath)) {
       return null;
     }
@@ -132,14 +195,14 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   /**
-   * Determine the source type of a skill
+   * Determine the source type of an extension
    */
-  getSkillSource(skillPath: string): 'vendor' | 'local' | { repo: string; commit: string } {
-    if (this.isSymlink(skillPath)) {
+  getExtensionSource(extensionPath: string): 'vendor' | 'local' | { repo: string; commit: string } {
+    if (this.isSymlink(extensionPath)) {
       return 'vendor';
     }
 
-    const upstream = this.readUpstreamFile(skillPath);
+    const upstream = this.readUpstreamFile(extensionPath);
     if (upstream) {
       return { repo: upstream.source, commit: upstream.commit };
     }
@@ -147,14 +210,39 @@ export class OpenCodeAdapter implements AgentAdapter {
     return 'local';
   }
 
-  async listSkills(): Promise<Skill[]> {
+  async listExtensions(): Promise<Extension[]> {
     const agentConfig = this.config.agents['opencode'];
-    const skills: Skill[] = [];
+    const extensions: Extension[] = [];
 
     if (!existsSync(agentConfig.skillsPath)) {
       return [];
     }
 
+    // List MCP servers from opencode.json
+    const opencodeConfig = this.readOpenCodeConfig();
+    if (opencodeConfig?.mcp) {
+      for (const [name, server] of Object.entries(opencodeConfig.mcp)) {
+        // OpenCode uses type: "remote" with url, or command-based
+        const transportType = server.type === 'remote' ? 'http' : (server.command ? 'command' : 'http');
+        
+        extensions.push({
+          name,
+          type: 'mcp',
+          agent: 'opencode',
+          description: `MCP server: ${name}`,
+          config: {
+            type: transportType,
+            url: server.url,
+            command: server.command,
+            args: server.args,
+            env: server.env,
+          },
+          enabled: server.enabled !== false,
+        });
+      }
+    }
+
+    // List skills from skills directory
     const manifest = this.readManifest();
     const customized = new Set<string>();
     const local = new Set<string>();
@@ -173,14 +261,14 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
 
     for (const dir of readdirSync(agentConfig.skillsPath)) {
-      const skillPath = join(agentConfig.skillsPath, dir);
+      const extensionPath = join(agentConfig.skillsPath, dir);
 
-      const stat = lstatSync(skillPath);
+      const stat = lstatSync(extensionPath);
       if (!stat.isDirectory() && !stat.isSymbolicLink()) {
         continue;
       }
 
-      const skillMdPath = join(skillPath, 'SKILL.md');
+      const skillMdPath = join(extensionPath, 'SKILL.md');
       if (!existsSync(skillMdPath)) {
         continue;
       }
@@ -190,67 +278,112 @@ export class OpenCodeAdapter implements AgentAdapter {
       const frontmatter = this.parseFrontmatter(content);
 
       // Determine source type
-      const source = this.getSkillSource(skillPath);
+      const source = this.getExtensionSource(extensionPath);
 
-      skills.push({
+      extensions.push({
         name: frontmatter.name || dir,
         type: 'skill' as const,
         agent: 'opencode' as const,
         description: frontmatter.description,
-        path: skillPath,
+        path: extensionPath,
         enabled: !customized.has(dir) && !local.has(dir),
-        source: source,
+        source: typeof source === 'string' ? source : undefined,
       });
     }
 
-    return skills;
+    return extensions;
   }
 
-  async addSkill(skill: Skill): Promise<void> {
+  async addExtension(extension: Extension): Promise<void> {
     const agentConfig = this.config.agents['opencode'];
 
-    if (!skill.path) {
-      throw new Error('Skill path is required for OpenCode');
+    // Handle MCP servers
+    if (extension.type === 'mcp' && extension.config) {
+      const mcpConfig = extension.config as Record<string, unknown>;
+      const transportType = mcpConfig.type as string || 'command';
+
+      // Validate transport type
+      const validation = transportValidator.validateTransportType(transportType);
+      if (!validation.valid) {
+        throw new Error(`Invalid MCP transport type: ${validation.errors.join(', ')}`);
+      }
+
+      const config = this.readOpenCodeConfig() || { mcp: {} };
+      config.mcp = config.mcp || {};
+
+      // OpenCode MCP format: type: "remote" with url, or command-based
+      if (transportType === 'http' || transportType === 'sse' || transportType === 'websocket') {
+        config.mcp[extension.name] = {
+          type: 'remote',
+          url: mcpConfig.url as string,
+          enabled: extension.enabled,
+        };
+      } else {
+        config.mcp[extension.name] = {
+          type: 'command',
+          command: mcpConfig.command as string,
+          args: mcpConfig.args as string[] | undefined,
+          env: mcpConfig.env as Record<string, string> | undefined,
+          enabled: extension.enabled,
+        };
+      }
+
+      this.writeOpenCodeConfig(config);
+      return;
     }
 
-    const targetPath = join(agentConfig.skillsPath, skill.name);
+    // Handle skills (existing logic)
+    if (!extension.path) {
+      throw new Error('Extension path is required for OpenCode skills');
+    }
+
+    const targetPath = join(agentConfig.skillsPath, extension.name);
 
     // Remove existing symlink or directory
     if (this.isSymlink(targetPath)) {
       unlinkSync(targetPath);
     } else if (existsSync(targetPath)) {
-      throw new Error(`Skill ${skill.name} already exists as a directory`);
+      throw new Error(`Extension ${extension.name} already exists as a directory`);
     }
 
-    // Create symlink to skill source (vendor pattern)
-    symlinkSync(skill.path, targetPath);
+    // Create symlink to extension source (vendor pattern)
+    symlinkSync(extension.path, targetPath);
   }
 
-  async removeSkill(skillName: string): Promise<void> {
+  async removeExtension(extensionName: string): Promise<void> {
     const agentConfig = this.config.agents['opencode'];
-    const skillPath = join(agentConfig.skillsPath, skillName);
+    const extensionPath = join(agentConfig.skillsPath, extensionName);
 
+    // First, try to remove from MCP config
+    const config = this.readOpenCodeConfig();
+    if (config?.mcp?.[extensionName]) {
+      delete config.mcp[extensionName];
+      this.writeOpenCodeConfig(config);
+      return;
+    }
+
+    // Handle skills (existing logic)
     // Use lstatSync to check if the symlink/file itself exists (doesn't follow symlinks)
-    if (!existsSync(skillPath) && !this.isSymlink(skillPath)) {
+    if (!existsSync(extensionPath) && !this.isSymlink(extensionPath)) {
       return;
     }
 
     // Handle symlinks
-    if (this.isSymlink(skillPath)) {
-      unlinkSync(skillPath);
+    if (this.isSymlink(extensionPath)) {
+      unlinkSync(extensionPath);
     } else {
-      // Handle directories (customized or local skills)
-      rmSync(skillPath, { recursive: true });
+      // Handle directories (customized or local extensions)
+      rmSync(extensionPath, { recursive: true });
     }
 
     // Update manifest to remove from customized if present
-    this.removeFromCustomized(skillName);
+    this.removeFromCustomized(extensionName);
   }
 
   /**
-   * Remove a skill from the customized array in manifest
+   * Remove an extension from the customized array in manifest
    */
-  removeFromCustomized(skillName: string): void {
+  removeFromCustomized(extensionName: string): void {
     const manifestPath = this.getManifestPath();
     if (!existsSync(manifestPath)) {
       return;
@@ -260,7 +393,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       const manifest = this.readManifest();
       if (manifest && Array.isArray((manifest as Record<string, unknown>).customized)) {
         const customized = (manifest as { customized: string[] }).customized;
-        const index = customized.indexOf(skillName);
+        const index = customized.indexOf(extensionName);
         if (index > -1) {
           customized.splice(index, 1);
           writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
@@ -274,7 +407,7 @@ export class OpenCodeAdapter implements AgentAdapter {
   async getAgentInfo(): Promise<DetectedAgent> {
     const agentConfig = this.config.agents['opencode'];
     const installed = this.detect();
-    const skills = installed ? await this.listSkills() : [];
+    const extensions = installed ? await this.listExtensions() : [];
 
     return {
       type: 'opencode',
@@ -282,7 +415,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       installed,
       configPath: agentConfig.configPath,
       skillsPath: agentConfig.skillsPath,
-      skills: skills,
+      extensions,
     };
   }
 
