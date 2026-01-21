@@ -1,0 +1,115 @@
+import { AgentAdapter, AgentType, DetectedAgent, Skill } from '../types.js';
+import { AgentManagerConfig } from '../config.js';
+import { ClaudeAdapter } from './ClaudeAdapter.js';
+import { CursorAdapter } from './CursorAdapter.js';
+import { GeminiAdapter } from './GeminiAdapter.js';
+import { OpenCodeAdapter } from './OpenCodeAdapter.js';
+
+export interface AgentRegistry {
+  detect(): DetectedAgent[];
+  listAllSkills(): Promise<Skill[]>;
+  getAdapter(type: AgentType): AgentAdapter | undefined;
+  getDetectedAgents(): DetectedAgent[];
+}
+
+export function createAgentRegistry(config: AgentManagerConfig): AgentRegistry {
+  const adapters: Map<AgentType, AgentAdapter> = new Map();
+  
+  // Initialize adapters
+  adapters.set('claude-code', new ClaudeAdapter(config));
+  adapters.set('cursor', new CursorAdapter(config));
+  adapters.set('gemini-cli', new GeminiAdapter(config));
+  adapters.set('opencode', new OpenCodeAdapter(config));
+  
+  return {
+    detect(): DetectedAgent[] {
+      const detected: DetectedAgent[] = [];
+      
+      for (const [type, adapter] of adapters) {
+        if (adapter.detect()) {
+          detected.push(adapter.getAgentInfoSync());
+        }
+      }
+      
+      return detected;
+    },
+    
+    async listAllSkills(): Promise<Skill[]> {
+      const skills: Skill[] = [];
+      
+      for (const adapter of adapters.values()) {
+        if (adapter.detect()) {
+          skills.push(...(await adapter.listSkills()));
+        }
+      }
+      
+      return skills;
+    },
+    
+    getAdapter(type: AgentType): AgentAdapter | undefined {
+      return adapters.get(type);
+    },
+    
+    getDetectedAgents(): DetectedAgent[] {
+      return this.detect();
+    },
+  };
+}
+
+// Add getAgentInfoSync to AgentAdapter interface
+declare module '../types.js' {
+  interface AgentAdapter {
+    getAgentInfoSync(): DetectedAgent;
+  }
+}
+
+// Implement getAgentInfoSync in base adapters
+ClaudeAdapter.prototype.getAgentInfoSync = function() {
+  const agentConfig = this.config.agents['claude-code'];
+  const installed = this.detect();
+  return {
+    type: 'claude-code',
+    name: 'Claude Code',
+    installed,
+    configPath: agentConfig.configPath,
+    skills: [],
+  };
+};
+
+CursorAdapter.prototype.getAgentInfoSync = function() {
+  const agentConfig = this.config.agents['cursor'];
+  const installed = this.detect();
+  return {
+    type: 'cursor',
+    name: 'Cursor',
+    installed,
+    configPath: agentConfig.configPath,
+    skills: [],
+  };
+};
+
+GeminiAdapter.prototype.getAgentInfoSync = function() {
+  const agentConfig = this.config.agents['gemini-cli'];
+  const installed = this.detect();
+  return {
+    type: 'gemini-cli',
+    name: 'Gemini CLI',
+    installed,
+    configPath: agentConfig.configPath,
+    skillsPath: agentConfig.skillsPath,
+    skills: [],
+  };
+};
+
+OpenCodeAdapter.prototype.getAgentInfoSync = function() {
+  const agentConfig = this.config.agents['opencode'];
+  const installed = this.detect();
+  return {
+    type: 'opencode',
+    name: 'OpenCode',
+    installed,
+    configPath: agentConfig.configPath,
+    skillsPath: agentConfig.skillsPath,
+    skills: [],
+  };
+};
