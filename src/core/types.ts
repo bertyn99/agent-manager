@@ -201,3 +201,64 @@ export interface ManifestSource {
   include: string[];
   exclude: string[];
 }
+
+// New manifest v2.0.0 types (separate MCPs from Skills, group by origin)
+
+/**
+ * New manifest structure (v2.0.0)
+ * Separates MCP servers from skills and groups skills by origin repository
+ */
+export interface NewAgentManagerManifest {
+  version: string;
+  updated: string;
+  mcp: Record<string, {
+    agents: AgentType[];
+    config?: Record<string, unknown>;
+  }>;
+  skills: SkillOriginGroup[];
+}
+
+/**
+ * Group of skills from a single origin (remote repo or local)
+ */
+export interface SkillOriginGroup {
+  origin: string;
+  path: string;
+  branch: string;
+  include: string[];
+  exclude: string[];
+  skills: SkillEntry[];
+}
+
+/**
+ * Individual skill within an origin group
+ */
+export interface SkillEntry {
+  name: string;
+  folderName: string;
+  agents: AgentType[];
+  description?: string;
+}
+
+// Migration types (v1.0.0 -> v2.0.0)
+
+/**
+ * Legacy manifest format (v1.0.0)
+ */
+export interface LegacyManifest {
+  version: string;
+  updated: string;
+  skills: ManifestSkill[];
+  sources: ManifestSource[];
+}
+
+/**
+ * Result of migration operation
+ */
+export interface MigrationResult {
+  success: boolean;
+  migratedSkills: number;
+  migratedMcps: number;
+  migratedSources: number;
+  errors: string[];
+}

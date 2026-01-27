@@ -1,6 +1,8 @@
 {
-  "active_plan": "/home/bertyn/agent-manager/.sisyphus/plans/test-infrastructure-overhaul.md",
-  "started_at": "2026-01-21T19:12:52.488Z",
-  "session_ids": ["ses_422d5def8ffe0BF3wiiU74BEGO", "ses_422d5def8ffe0BF3wiiU74BEGO", "ses_422d5def8ffe0BF3wiiU74BEGO", "ses_422d5def8ffe0BF3wiiU74BEGO", "ses_422d5def8ffe0BF3wiiU74BEGO"],
-  "plan_name": "test-infrastructure-overhaul"
+  "active_plan": "/home/bertyn/agent-manager/.sisyphus/plans/simplified-implementation.md",
+  "started_at": "2026-01-27T22:18:52.980Z",
+  "session_ids": [
+    "ses_417c329bbffe88jovAHqJ8peOm"
+  ],
+  "plan_name": "simplified-implementation"
 }

@@ -141,12 +141,15 @@ agent-manager migrate
 ```
 
 ### manifest
-Show or manage the agent-manager manifest.
+Show or manage the agent-manager manifest (v2.0.0 with MCPs separated and skills grouped by origin).
 ```bash
-agent-manager manifest           # Show manifest
+agent-manager manifest           # Show manifest (v2.0.0 structure)
 agent-manager manifest --json    # JSON output
 agent-manager manifest --import ~/.config/opencode/skills.yaml  # Import from OpenCode
 agent-manager manifest --clear   # Clear manifest (use with caution)
+agent-manager manifest --sync   # Sync skills from origin repositories (v2.0.0)
+agent-manager manifest --sync --verbose  # Show detailed sync output
+agent-manager manifest --sync --dry-run  # Preview sync without applying
 ```
 
 ## MCP Transport Types

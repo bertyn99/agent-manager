@@ -1,0 +1,9 @@
+
+version: '1.0.0'
+skills:
+  - name: test-skill-1
+    description: A test skill
+    installedAt: '2024-01-01T00:00:00.000Z'
+    agents:
+      - agent: claude-code
+        installedAt: '2024-01-01T00:00:00.000Z'
