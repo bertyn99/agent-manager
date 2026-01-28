@@ -1,7 +1,6 @@
 // Agent Manager CLI - Built with Citty, Consola, and UnJS Stack
 // Universal CLI to manage extensions across AI coding agents
 
-import { withDryRun } from '../core/dry-run.js';
 import { defineCommand, runMain } from 'citty';
 import { existsSync, readdirSync, rmSync, readJSONSync, writeFileSync } from 'fs-extra';
 import { join } from 'pathe';
@@ -11,11 +10,8 @@ import { createAgentRegistry } from '../adapters/index.js';
 import { addExtension, addGlobalSkill } from '../core/skill-installer.js';
 import { removeExtension } from '../core/skill-remover.js';
 import { syncExtensions, upgradeExtension, upgradeAllExtensions } from '../core/skill-sync.js';
-import { readManifest, readManifestV2, importFromOpenCodeManifest, clearManifest, syncFromSources } from '../core/manifest.js';
+import { readManifest, importFromOpenCodeManifest, clearManifest } from '../core/manifest.js';
 import type { AgentType } from '../core/types.js';
-import { createBackup } from '../core/backup.js';
-import { restoreFromBackup } from '../core/restore.js';
-import { listProfiles, createProfile, applyProfile, removeProfile } from '../core/profiles.js';
 
 // Shared command implementation
 function runDetect() {
@@ -40,74 +36,19 @@ function runDetect() {
   logger.success(`Found ${agents.length} agent(s)`);
 }
 
-async function runList(options: { json?: boolean; verbose?: boolean; agent?: string; type?: string; status?: string }) {
+async function runList(options: { json?: boolean; verbose?: boolean }) {
   const config = loadConfigSync();
   const registry = createAgentRegistry(config);
-  let extensions = await registry.listAllExtensions();
-
-  // Apply filters
-  let filtered = extensions;
-
-  // 1. Filter by agent
-  if (options.agent) {
-    const targetAgents = options.agent.split(',').map(a => a.trim());
-    const validAgents = ['claude-code', 'cursor', 'gemini-cli', 'opencode'];
-    const invalidAgents = targetAgents.filter(a => !validAgents.includes(a));
-    if (invalidAgents.length > 0) {
-      logger.error(`Invalid agent(s): ${invalidAgents.join(', ')}`);
-      logger.info(`Valid agents: ${validAgents.join(', ')}`);
-      process.exit(1);
-    }
-    filtered = filtered.filter(e => targetAgents.includes(e.agent));
-  }
-
-  // 2. Filter by type
-  if (options.type) {
-    const targetTypes = options.type.split(',').map(t => t.trim());
-    const validTypes = ['mcp', 'skill', 'command'];
-    const invalidTypes = targetTypes.filter(t => !validTypes.includes(t));
-    if (invalidTypes.length > 0) {
-      logger.error(`Invalid type(s): ${invalidTypes.join(', ')}`);
-      logger.info(`Valid types: ${validTypes.join(', ')}`);
-      process.exit(1);
-    }
-    filtered = filtered.filter(e => targetTypes.includes(e.type));
-  }
-
-  // 3. Filter by status
-  if (options.status) {
-    const targetStatus = options.status.toLowerCase();
-    if (targetStatus !== 'enabled' && targetStatus !== 'disabled') {
-      logger.error(`Invalid status: ${options.status}`);
-      logger.info('Valid statuses: enabled, disabled');
-      process.exit(1);
-    }
-    filtered = filtered.filter(e =>
-      (targetStatus === 'enabled' && e.enabled) ||
-      (targetStatus === 'disabled' && !e.enabled)
-    );
-  }
-
-  if (filtered.length === 0) {
-    logger.warn('No extensions found after applying filters.');
+  const extensions = await registry.listAllExtensions();
+  
+  if (extensions.length === 0) {
+    logger.warn('No extensions found.');
+    logger.info('Use "agent-manager add <repo>" to add extensions.');
     return;
   }
-
+  
   if (options.json) {
-    console.log(JSON.stringify(filtered, null, 2));
-    return;
-  }
-
-  // Display as table if requested (default)
-  if (options.table !== false) {
-    const tableData = filtered.map(e => ({
-      Name: e.name,
-      Type: e.type,
-      Agents: Array.from(new Set(filtered.filter(ex => ex.name === e.name).map(ex => ex.agent))).join(', '),
-      Status: e.enabled ? '✓' : '✗',
-      Source: e.source?.type || 'local',
-    }));
-    console.table(tableData);
+    console.log(JSON.stringify(extensions, null, 2));
     return;
   }
   
@@ -171,62 +112,6 @@ async function runList(options: { json?: boolean; verbose?: boolean; agent?: str
         }
       }
     }
-  }
-  
-  // Show manifest structure if available (v2.0.0)
-  try {
-    const manifest = readManifestV2(config.home);
-    if (manifest.version === '2.0.0') {
-      logger.info('\n=== From Manifest (v2.0.0) ===\n');
-      
-      // Show MCP servers by agent
-      logger.info('MCP Servers by Agent:\n');
-      const mcpByAgent: Record<string, string[]> = {
-        'claude-code': [],
-        'cursor': [],
-        'gemini-cli': [],
-        'opencode': [],
-      };
-      
-      for (const [mcpName, mcpConfig] of Object.entries(manifest.mcp)) {
-        for (const agent of mcpConfig.agents) {
-          if (mcpByAgent[agent]) {
-            mcpByAgent[agent].push(mcpName);
-          }
-        }
-      }
-      
-      for (const [agent, mcps] of Object.entries(mcpByAgent)) {
-        if (mcps.length > 0) {
-          const agentName = agent.replace('-cli', '').replace('-code', '').replace('opencode', 'oc');
-          logger.log(`  [${agentName}]: ${mcps.join(', ')}`);
-        }
-      }
-      
-      // Show skills by origin
-      logger.info('\nSkills by Origin:\n');
-      for (const originGroup of manifest.skills) {
-        logger.log(`  ${originGroup.origin}`);
-        if (originGroup.include.length > 0) {
-          logger.log(`    Include: ${originGroup.include.join(', ')}`);
-        }
-        if (originGroup.exclude.length > 0) {
-          logger.log(`    Exclude: ${originGroup.exclude.join(', ')}`);
-        }
-        logger.log(`    Skills (${originGroup.skills.length}):`);
-        for (const skill of originGroup.skills) {
-          const agentTags = skill.agents.length > 0
-            ? skill.agents.map(a => `[${a}]`).join(' ')
-            : '[]';
-          logger.log(`      - ${skill.folderName} ${agentTags}`);
-          if (skill.description && options.verbose) {
-            logger.log(`        ${skill.description.slice(0, 50)}...`);
-          }
-        }
-      }
-    }
-  } catch (error) {
-    // Manifest doesn't exist or is old format - skip display
   }
 }
 
@@ -333,29 +218,23 @@ async function runAdd(args: {
 async function runRemove(args: { 
   extension: string;
   from?: string;
-  dryRun?: boolean;
 }) {
-  const result = await withDryRun('remove extension', args.dryRun || false, async () => {
-    const config = loadConfigSync();
-    
-    const targetAgents = args.from
-      ? args.from.split(',').map(a => a.trim()) as AgentType[]
-      : undefined;
-    
-    return await removeExtension(args.extension, config, {
-      from: targetAgents,
-      dryRun: args.dryRun,
-    });
+  const config = loadConfigSync();
+  
+  const targetAgents = args.from
+    ? args.from.split(',').map(a => a.trim()) as AgentType[]
+    : undefined;
+  
+  const result = await removeExtension(args.extension, config, {
+    from: targetAgents,
   });
   
-  if (!args.dryRun) {
-    if (result.success) {
-      logger.success(`Successfully removed extension "${result.extension}"`);
-      logger.info(`Removed from: ${result.removedFrom.join(', ')}`);
-    } else {
-      logger.error(`Failed to remove extension: ${result.error}`);
-      process.exit(1);
-    }
+  if (result.success) {
+    logger.success(`Successfully removed extension "${result.extension}"`);
+    logger.info(`Removed from: ${result.removedFrom.join(', ')}`);
+  } else {
+    logger.error(`Failed to remove extension: ${result.error}`);
+    process.exit(1);
   }
 }
 
@@ -808,99 +687,13 @@ async function runCommand(args: {
   }
 }
 
-async function runProfile(args: {
-  subcommand: string;
-  name?: string;
-  description?: string;
-  currentSetup?: boolean;
-  dryRun?: boolean;
-}) {
-  const config = loadConfigSync();
-  ensureDirs(config);
-
-  switch (args.subcommand) {
-    case 'list': {
-      const profiles = listProfiles(config.home);
-      if (profiles.length === 0) {
-        logger.info('No profiles found.');
-        return;
-      }
-      logger.info(`\nProfiles (${profiles.length})\n`);
-      for (const profile of profiles) {
-        logger.log(`  - ${profile.name}`);
-        if (profile.description) {
-          logger.log(`    ${profile.description.slice(0, 60)}`);
-        }
-        logger.log(`    Extensions: ${profile.extensions.length}`);
-      }
-      break;
-    }
-
-    case 'create': {
-      if (!args.name) {
-        logger.error('Profile name is required');
-        process.exit(1);
-      }
-      await createProfile(config.home, args.name, {
-        description: args.description,
-        currentSetup: args.currentSetup || false,
-      });
-      break;
-    }
-
-    case 'use': {
-      if (!args.name) {
-        logger.error('Profile name is required');
-        process.exit(1);
-      }
-      await applyProfile(config.home, args.name, {
-        dryRun: args.dryRun,
-      });
-      break;
-    }
-
-    case 'remove': {
-      if (!args.name) {
-        logger.error('Profile name is required');
-        process.exit(1);
-      }
-      removeProfile(config.home, args.name);
-      break;
-    }
-
-    default:
-      logger.error(`Unknown profile subcommand: ${args.subcommand}`);
-      process.exit(1);
-  }
-}
-
-async function runManifest(args: { json?: boolean; import?: string; clear?: boolean; sync?: boolean; verbose?: boolean; dryRun?: boolean }) {
+async function runManifest(args: { json?: boolean; import?: string; clear?: boolean }) {
   const config = loadConfigSync();
   
   if (args.clear) {
     logger.warn('Clearing agent-manager manifest...');
     clearManifest(config.home);
     logger.success('Manifest cleared');
-    return;
-  }
-  
-  if (args.sync) {
-    logger.info('Syncing skills from configured sources...');
-    const result = await syncFromSources(config.home, {
-      dryRun: args.dryRun,
-      verbose: args.verbose,
-    });
-    
-    if (result.success) {
-      logger.success('Sync complete');
-    }
-    
-    if (result.details.length > 0 && args.verbose) {
-      logger.info('Details:');
-      for (const detail of result.details) {
-        logger.log('  - ' + detail);
-      }
-    }
     return;
   }
   
@@ -911,8 +704,8 @@ async function runManifest(args: { json?: boolean; import?: string; clear?: bool
     return;
   }
   
-  // Show manifest - use readManifestV2 for v2.0.0 support
-  const manifest = readManifestV2(config.home);
+  // Show manifest
+  const manifest = readManifest(config.home);
   
   if (args.json) {
     console.log(JSON.stringify(manifest, null, 2));
@@ -922,82 +715,27 @@ async function runManifest(args: { json?: boolean; import?: string; clear?: bool
   logger.info('Agent Manager Manifest');
   logger.info(`Version: ${manifest.version}`);
   logger.info(`Updated: ${manifest.updated}`);
+  logger.info(`\nSources (${manifest.sources.length}):`);
   
-  // Handle v2.0.0 format
-  if (manifest.version === '2.0.0') {
-    // Show MCP servers
-    const mcpEntries = Object.entries(manifest.mcp);
-    logger.info(`\nMCP Servers (${mcpEntries.length}):`);
-    
-    if (mcpEntries.length === 0) {
-      logger.log('  (none)');
-    } else {
-      for (const [mcpName, mcpConfig] of mcpEntries) {
-        logger.log(`  - ${mcpName}`);
-        logger.log(`    Agents: ${mcpConfig.agents.join(', ')}`);
-      }
+  for (const source of manifest.sources) {
+    logger.log(`  - ${source.repo}`);
+    logger.log(`    Path: ${source.path}, Branch: ${source.branch}`);
+    if (source.include?.length) {
+      logger.log(`    Include: ${source.include.join(', ')}`);
     }
-    
-    // Show skills by origin
-    logger.info(`\nSkills by Origin (${manifest.skills.length}):`);
-    
-    if (manifest.skills.length === 0) {
-      logger.log('  (none)');
-    } else {
-      for (const originGroup of manifest.skills) {
-        logger.log(`  - ${originGroup.origin}`);
-        logger.log(`    Path: ${originGroup.path}, Branch: ${originGroup.branch || 'main'}`);
-        if (originGroup.include?.length) {
-          logger.log(`    Include: ${originGroup.include.join(', ')}`);
-        }
-        if (originGroup.exclude?.length) {
-          logger.log(`    Exclude: ${originGroup.exclude.join(', ')}`);
-        }
-        logger.log(`    Skills (${originGroup.skills.length}):`);
-        for (const skill of originGroup.skills) {
-          const agentTags = skill.agents.length > 0 ? skill.agents.join(', ') : '(none)';
-          logger.log(`      - ${skill.name} [${agentTags}]`);
-          if (skill.description && args.verbose) {
-            logger.log(`        ${skill.description.slice(0, 60)}...`);
-          }
-        }
-      }
+    if (source.exclude?.length) {
+      logger.log(`    Exclude: ${source.exclude.join(', ')}`);
     }
-  } else {
-    // Handle legacy v1.0.0 format (cast to any for fallback display)
-    const legacyManifest = manifest as any;
-    
-    logger.info(`\nSources (${legacyManifest.sources?.length || 0}):`);
-    
-    if (legacyManifest.sources?.length) {
-      for (const source of legacyManifest.sources) {
-        logger.log(`  - ${source.repo}`);
-        logger.log(`    Path: ${source.path}, Branch: ${source.branch}`);
-        if (source.include?.length) {
-          logger.log(`    Include: ${source.include.join(', ')}`);
-        }
-        if (source.exclude?.length) {
-          logger.log(`    Exclude: ${source.exclude.join(', ')}`);
-        }
-      }
-    } else {
-      logger.log('  (none)');
+  }
+  
+  logger.info(`\nSkills (${manifest.skills.length}):`);
+  
+  for (const skill of manifest.skills) {
+    logger.log(`  - ${skill.name}`);
+    if (skill.description) {
+      logger.log(`    ${skill.description.slice(0, 50)}...`);
     }
-    
-    logger.info(`\nSkills (${legacyManifest.skills?.length || 0}):`);
-    
-    if (legacyManifest.skills?.length) {
-      for (const skill of legacyManifest.skills) {
-        logger.log(`  - ${skill.name}`);
-        if (skill.description) {
-          logger.log(`    ${skill.description.slice(0, 50)}...`);
-        }
-        const agents = skill.agents?.map((a) => a.agent).join(', ') || '(none)';
-        logger.log(`    Agents: ${agents}`);
-      }
-    } else {
-      logger.log('  (none)');
-    }
+    logger.log(`    Agents: ${skill.agents.map(a => a.agent).join(', ')}`);
   }
 }
 
@@ -1026,23 +764,6 @@ const listCommand = defineCommand({
       type: 'boolean',
       description: 'Show detailed information',
       alias: 'v',
-    },
-    agent: {
-      type: 'string',
-      description: 'Filter by specific agent(s) (comma-separated, e.g., claude-code,cursor)',
-    },
-    type: {
-      type: 'string',
-      description: 'Filter by extension type (mcp,skill,command)',
-    },
-    status: {
-      type: 'string',
-      description: 'Filter by status (enabled,disabled)',
-    },
-    table: {
-      type: 'boolean',
-      description: 'Show output as table',
-      default: true,
     },
   },
   run({ args }) {
@@ -1111,14 +832,9 @@ const removeCommand = defineCommand({
       type: 'string',
       description: 'Remove from specific agents (comma-separated)',
     },
-    dryRun: {
-      type: 'boolean',
-      description: 'Preview changes without applying',
-      alias: 'd',
-    },
   },
   run({ args }) {
-    runRemove(args as any);
+    runRemove(args);
   },
 });
 
@@ -1237,7 +953,7 @@ const migrateCommand = defineCommand({
 const manifestCommand = defineCommand({
   meta: {
     name: 'manifest',
-    description: 'Show or manage agent-manager manifest (v2.0.0 - MCPs separated, skills grouped by origin)',
+    description: 'Show or manage agent-manager manifest',
   },
   args: {
     json: {
@@ -1251,19 +967,6 @@ const manifestCommand = defineCommand({
     clear: {
       type: 'boolean',
       description: 'Clear the manifest (use with caution)',
-    },
-    sync: {
-      type: 'boolean',
-      description: 'Sync skills from origin repositories using include/exclude filters (v2.0.0)',
-    },
-    verbose: {
-      type: 'boolean',
-      description: 'Show detailed sync output (v2.0.0)',
-    },
-    dryRun: {
-      type: 'boolean',
-      description: 'Preview sync changes without applying',
-      alias: 'd',
     },
   },
   run({ args }) {
@@ -1312,37 +1015,48 @@ const mcpCommand = defineCommand({
   },
 });
 
-const profileCommand = defineCommand({
+const commandCommand = defineCommand({
   meta: {
-    name: 'profile',
-    description: 'Manage extension profiles',
+    name: 'command',
+    description: 'Manage Gemini CLI commands',
   },
   args: {
     subcommand: {
-      type: 'string',
-      description: 'Profile subcommand (list, create, use, remove)',
+      type: 'positional',
+      description: 'Subcommand (list, add, remove)',
       required: true,
     },
     name: {
       type: 'string',
-      description: 'Profile name',
+      description: 'Command name',
+    },
+    to: {
+      type: 'string',
+      description: 'Target agents (comma-separated)',
     },
     description: {
       type: 'string',
-      description: 'Profile description',
+      description: 'Command description',
     },
-    currentSetup: {
-      type: 'boolean',
-      description: 'Include currently installed extensions in profile',
+    prompt: {
+      type: 'string',
+      description: 'Command prompt',
     },
-    dryRun: {
-      type: 'boolean',
-      description: 'Preview changes without applying',
-      alias: 'd',
+    output: {
+      type: 'string',
+      description: 'Output type (text, json, streaming)',
+    },
+    args: {
+      type: 'string',
+      description: 'Comma-separated arguments',
+    },
+    totalBudget: {
+      type: 'number',
+      description: 'Total budget for the command',
     },
   },
   run({ args }) {
-    runProfile(args);
+    runCommand(args as Parameters<typeof runCommand>[0]);
   },
 });
 
@@ -1378,9 +1092,7 @@ const mainCommand = defineCommand({
     migrate: migrateCommand,
     manifest: manifestCommand,
     mcp: mcpCommand,
-    profile: profileCommand,
-    backup: backupCommand,
-    restore: restoreCommand,
+    command: commandCommand,
   },
 });
 
