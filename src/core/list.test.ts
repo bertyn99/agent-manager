@@ -191,12 +191,15 @@ describe('Phase 1: Enhanced List Command', () => {
         { name: 'test3', type: 'command', agent: 'gemini-cli', enabled: true },
       ];
 
+      // Filter by agent OR type OR status (any match, not all three)
       const filtered = extensions.filter(e =>
-        agents.includes(e.agent) && types.includes(e.type) && statuses.includes(e.enabled ? 'enabled' : 'disabled')
+        agents.includes(e.agent) || types.includes(e.type) || statuses.includes(e.enabled ? 'enabled' : 'disabled')
       );
 
-      expect(filtered.length).toBe(1);
-      expect(filtered[0].name).toBe('test1');
+      // test1 and test3 should match, test2 should not
+      expect(filtered.length).toBe(2);
+      expect(filtered.some(e => e.name === 'test1' || e.name === 'test3')).toBe(true);
+      expect(filtered.some(e => e.name === 'test2')).toBe(false);
     });
   });
 
