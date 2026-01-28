@@ -13,7 +13,9 @@ import { removeExtension } from '../core/skill-remover.js';
 import { syncExtensions, upgradeExtension, upgradeAllExtensions } from '../core/skill-sync.js';
 import { readManifest, readManifestV2, importFromOpenCodeManifest, clearManifest, syncFromSources } from '../core/manifest.js';
 import type { AgentType } from '../core/types.js';
-import { withDryRun } from '../core/dry-run.js';
+import { createBackup } from '../core/backup.js';
+import { restoreFromBackup } from '../core/restore.js';
+import { listProfiles, createProfile, applyProfile, removeProfile } from '../core/profiles.js';
 
 // Shared command implementation
 function runDetect() {
@@ -806,6 +808,72 @@ async function runCommand(args: {
   }
 }
 
+async function runProfile(args: {
+  subcommand: string;
+  name?: string;
+  description?: string;
+  currentSetup?: boolean;
+  dryRun?: boolean;
+}) {
+  const config = loadConfigSync();
+  ensureDirs(config);
+
+  switch (args.subcommand) {
+    case 'list': {
+      const profiles = listProfiles(config.home);
+      if (profiles.length === 0) {
+        logger.info('No profiles found.');
+        return;
+      }
+      logger.info(`\nProfiles (${profiles.length})\n`);
+      for (const profile of profiles) {
+        logger.log(`  - ${profile.name}`);
+        if (profile.description) {
+          logger.log(`    ${profile.description.slice(0, 60)}`);
+        }
+        logger.log(`    Extensions: ${profile.extensions.length}`);
+      }
+      break;
+    }
+
+    case 'create': {
+      if (!args.name) {
+        logger.error('Profile name is required');
+        process.exit(1);
+      }
+      await createProfile(config.home, args.name, {
+        description: args.description,
+        currentSetup: args.currentSetup || false,
+      });
+      break;
+    }
+
+    case 'use': {
+      if (!args.name) {
+        logger.error('Profile name is required');
+        process.exit(1);
+      }
+      await applyProfile(config.home, args.name, {
+        dryRun: args.dryRun,
+      });
+      break;
+    }
+
+    case 'remove': {
+      if (!args.name) {
+        logger.error('Profile name is required');
+        process.exit(1);
+      }
+      removeProfile(config.home, args.name);
+      break;
+    }
+
+    default:
+      logger.error(`Unknown profile subcommand: ${args.subcommand}`);
+      process.exit(1);
+  }
+}
+
 async function runManifest(args: { json?: boolean; import?: string; clear?: boolean; sync?: boolean; verbose?: boolean; dryRun?: boolean }) {
   const config = loadConfigSync();
   
@@ -1310,7 +1378,9 @@ const mainCommand = defineCommand({
     migrate: migrateCommand,
     manifest: manifestCommand,
     mcp: mcpCommand,
-    command: commandCommand,
+    profile: profileCommand,
+    backup: backupCommand,
+    restore: restoreCommand,
   },
 });
 
