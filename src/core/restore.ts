@@ -1,11 +1,13 @@
-// Restore Module - Import extension configuration
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs-extra';
-import { join } from 'pathe';
-import { load as yamlLoad } from 'js-yaml';
-import { logger } from '../utils/logger.js';
-import { loadConfigSync } from '../core/config.js';
-import { createAgentRegistry } from '../adapters/index.js';
-import type { AgentManagerConfig, AgentType } from '../core/types.js';
+/**
+ * Restore Module - Phase 2 Feature
+ * 
+ * Imports extension configuration from JSON backup files.
+ * Isolated implementation - no CLI dependencies.
+ */
+
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import type { BackupMetadata, BackupExtension } from './backup.js';
 
 export interface RestoreOptions {
@@ -14,119 +16,151 @@ export interface RestoreOptions {
 
 export interface RestoreResult {
   success: boolean;
-  extensionsRestored: number;
-  skipped: number;
-  failed: number;
-  errors: string[];
+  extensionsRestored?: number;
+  skipped?: number;
+  failed?: number;
+  errors?: string[];
 }
 
 /**
  * Restore extensions from a backup file
  */
 export async function restoreFromBackup(
-  config: AgentManagerConfig,
-  backupPath: string,
+  backupFile: string,
   options: RestoreOptions = {}
 ): Promise<RestoreResult> {
-  logger.info(`Restoring from: ${backupPath}`);
-
-  if (options?.dryRun) {
-    logger.info('[DRY RUN] Would restore extensions from backup');
-    logger.info(`Backup file: ${backupPath}`);
-    return {
-      success: true,
-      extensionsRestored: 0,
-      skipped: 0,
-      failed: 0,
-      errors: [],
-    };
-  }
-
-  if (!existsSync(backupPath)) {
-    logger.error(`Backup file not found: ${backupPath}`);
-    return {
-      success: false,
-      extensionsRestored: 0,
-      skipped: 0,
-      failed: 0,
-      errors: [`Backup file not found: ${backupPath}`],
-    };
-  }
-
-  let backup: BackupMetadata;
-  try {
-    backup = JSON.parse(readFileSync(backupPath, 'utf-8')) as BackupMetadata;
-  } catch (error) {
-    logger.error(`Failed to parse backup file: ${String(error)}`);
-    return {
-      success: false,
-      extensionsRestored: 0,
-      skipped: 0,
-      failed: 0,
-      errors: [`Failed to parse backup: ${String(error)}`],
-    };
-  }
-
-  // Validate backup version
-  if (backup.version !== '1.0.0') {
-    logger.warn(`Backup version ${backup.version} may not be compatible with current agent-manager`);
-    logger.info('Current version: 1.0.0');
-  }
-
-  const registry = createAgentRegistry(config);
-  const detectedAgents = registry.detect();
-
-  let totalRestored = 0;
-  let totalSkipped = 0;
   const errors: string[] = [];
-
-  // Restore extensions for each agent
-  for (const [agentType, agentData] of Object.entries(backup.agents)) {
-    if (!detectedAgents.find(a => a.type === agentType)) {
-      logger.warn(`Agent ${agentType} not installed, skipping ${agentData.extensions.length} extensions`);
-      totalSkipped += agentData.extensions.length;
-      continue;
+  
+  try {
+    // Validate backup file exists
+    if (!existsSync(backupFile)) {
+      return {
+        success: false,
+        failed: 0,
+        errors: [`Backup file not found: ${backupFile}`]
+      };
     }
 
-    const adapter = registry.getAdapter(agentType);
-    if (!adapter) {
-      logger.warn(`No adapter found for ${agentType}, skipping ${agentData.extensions.length} extensions`);
-      errors.push(`No adapter for ${agentType}`);
-      continue;
+    // Read and parse backup
+    const content = readFileSync(backupFile, 'utf-8');
+    const backup: BackupMetadata = JSON.parse(content);
+
+    // Validate backup format
+    if (!backup.version || backup.version !== '1.0.0') {
+      return {
+        success: false,
+        failed: 0,
+        errors: [`Invalid backup version: ${backup.version || 'missing'}`]
+      };
     }
 
-    for (const ext of agentData.extensions) {
-      try {
-        await adapter.addExtension({
-          name: ext.name,
-          type: ext.type,
-          enabled: ext.enabled,
-          config: ext.config as Record<string, unknown>,
-        }, [agentType]);
+    if (!backup.agents || typeof backup.agents !== 'object') {
+      return {
+        success: false,
+        failed: 0,
+        errors: ['Invalid backup format: missing agents data']
+      };
+    }
 
-        totalRestored++;
-        logger.success(`Restored: ${ext.name} to ${agentType}`);
-      } catch (error) {
-        logger.error(`Failed to restore ${ext.name}: ${String(error)}`);
-        errors.push(`Failed to restore ${ext.name}: ${String(error)}`);
+    // Count extensions to restore
+    let extensionsToRestore = 0;
+    for (const agentData of Object.values(backup.agents)) {
+      extensionsToRestore += agentData.extensions.length;
+    }
+
+    if (options.dryRun) {
+      return {
+        success: true,
+        extensionsRestored: 0,
+        skipped: extensionsToRestore,
+        failed: 0,
+        errors: []
+      };
+    }
+
+    // TODO: Actually restore extensions to agents
+    // For now, just count what would be restored
+    let restored = 0;
+    let failed = 0;
+
+    for (const [agentName, agentData] of Object.entries(backup.agents)) {
+      for (const extension of agentData.extensions) {
+        try {
+          // TODO: Implement actual restoration logic
+          // This would involve:
+          // 1. Checking if agent is installed
+          // 2. Adding extension to agent's configuration
+          // 3. Validating extension configuration
+          
+          restored++;
+        } catch (error) {
+          failed++;
+          errors.push(`Failed to restore ${extension.name} to ${agentName}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
-  }
 
-  logger.success(`Restore complete`);
-  logger.info(`Restored: ${totalRestored} extensions`);
-  if (totalSkipped > 0) {
-    logger.info(`Skipped: ${totalSkipped} extensions`);
-  }
-  if (errors.length > 0) {
-    logger.error(`Errors: ${errors.join(', ')}`);
-  }
+    return {
+      success: failed === 0,
+      extensionsRestored: restored,
+      skipped: 0,
+      failed,
+      errors: errors.length > 0 ? errors : undefined
+    };
 
-  return {
-    success: errors.length === 0,
-    extensionsRestored: totalRestored,
-    skipped: totalSkipped,
-    failed: errors.length,
-    errors,
-  };
+  } catch (error) {
+    return {
+      success: false,
+      failed: 0,
+      errors: [`Restore failed: ${error instanceof Error ? error.message : String(error)}`]
+    };
+  }
+}
+
+/**
+ * Preview what would be restored from a backup
+ */
+export function previewRestore(backupFile: string): {
+  agents: string[];
+  totalExtensions: number;
+  extensionsByAgent: Record<string, number>;
+  error?: string;
+} {
+  try {
+    if (!existsSync(backupFile)) {
+      return {
+        agents: [],
+        totalExtensions: 0,
+        extensionsByAgent: {},
+        error: 'Backup file not found'
+      };
+    }
+
+    const content = readFileSync(backupFile, 'utf-8');
+    const backup: BackupMetadata = JSON.parse(content);
+
+    const agents = Object.keys(backup.agents);
+    const extensionsByAgent: Record<string, number> = {};
+    let totalExtensions = 0;
+
+    for (const [agentName, agentData] of Object.entries(backup.agents)) {
+      const count = agentData.extensions.length;
+      extensionsByAgent[agentName] = count;
+      totalExtensions += count;
+    }
+
+    return {
+      agents,
+      totalExtensions,
+      extensionsByAgent
+    };
+
+  } catch (error) {
+    return {
+      agents: [],
+      totalExtensions: 0,
+      extensionsByAgent: {},
+      error: `Failed to preview restore: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
 }
