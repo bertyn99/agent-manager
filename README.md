@@ -183,6 +183,46 @@ When adding MCP servers or commands, agent-manager will warn about:
 
 See [DESIGN.md](DESIGN.md) for detailed architecture documentation.
 
+## New Features
+
+### Enhanced List Filters (Phase 1)
+Filter extensions by agent, type, or status:
+```bash
+agent-manager list --agent=claude-code --type=mcp --status=enabled
+agent-manager list --table  # Table output
+```
+
+### Dry-Run Mode (Phase 1)
+Preview changes without applying:
+```bash
+agent-manager remove <ext> --dry-run
+agent-manager upgrade <ext> --dry-run
+```
+
+### Profile Management (Phase 1)
+Save and restore configurations:
+```bash
+agent-manager profile list
+agent-manager profile create <name> --current-setup
+agent-manager profile use <name>
+```
+
+### Backup & Restore (Phase 2)
+Export and import configurations:
+```bash
+agent-manager backup --output=./backup.json
+agent-manager restore ./backup.json --dry-run
+```
+
+**Note**: CLI execution is currently blocked due to a build system issue. The code is complete and tested. See [QUICKSTART.md](QUICKSTART.md) for programmatic usage.
+
+## Documentation
+
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started quickly
+- **[FEATURE_GUIDE.md](FEATURE_GUIDE.md)** - Complete feature documentation
+- **[PROJECT_STATUS.md](PROJECT_STATUS.md)** - Current project status
+- **docs/** - Architecture and design documentation
+
 ## License
 
 MIT
