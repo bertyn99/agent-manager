@@ -15,7 +15,7 @@ import {
   toNamespacedPath,
   posix,
   win32,
-} from 'pathe';
+} from "pathe";
 
 // Re-export for convenience
 export {
@@ -43,7 +43,7 @@ export function resolvePath(...paths: string[]): string {
 
 // Normalize to forward slashes regardless of OS
 export function normalizePath(path: string): string {
-  return normalize(path).replace(/\\/g, '/');
+  return normalize(path).replace(/\\/g, "/");
 }
 
 // Get relative path with forward slashes
@@ -58,7 +58,7 @@ export function isAbsolutePath(path: string): boolean {
 
 // Get extension without dot
 export function getExtension(path: string): string {
-  return extname(path).replace(/^\./, '');
+  return extname(path).replace(/^\./, "");
 }
 
 // Get filename without extension
@@ -68,17 +68,17 @@ export function getBasename(path: string): string {
 
 // Ensure path ends without slash
 export function withoutTrailingSlash(path: string): string {
-  return path.replace(/\/$/, '');
+  return path.replace(/\/$/, "");
 }
 
 // Ensure path ends with slash
 export function withTrailingSlash(path: string): string {
-  return path.endsWith('/') ? path : path + '/';
+  return path.endsWith("/") ? path : path + "/";
 }
 
 // Convert Windows path to POSIX
 export function toPosixPath(windowsPath: string): string {
-  return windowsPath.replace(/\\/g, '/');
+  return windowsPath.replace(/\\/g, "/");
 }
 
 // Get parent directory
@@ -100,9 +100,9 @@ export function safeJoin(base: string, ...paths: string[]): string {
 // Type guards
 export function isFilePath(path: string): boolean {
   const ext = getExtension(path);
-  return Boolean(ext) && !path.endsWith('/');
+  return Boolean(ext) && !path.endsWith("/");
 }
 
 export function isDirPath(path: string): boolean {
-  return path.endsWith('/') || (!getExtension(path) && !isAbsolutePath(path));
+  return path.endsWith("/") || (!getExtension(path) && !isAbsolutePath(path));
 }

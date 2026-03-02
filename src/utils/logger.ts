@@ -1,7 +1,7 @@
 // Utils - Logger with Consola v3
 // Elegant console logging with reporters and prompts
 
-import { createConsola } from 'consola';
+import { createConsola } from "consola";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ConsolaMethod = (...args: any[]) => void;
@@ -38,10 +38,7 @@ export function createSilentLogger() {
 }
 
 // Progress spinner helper
-export async function withSpinner<T>(
-  message: string,
-  fn: () => Promise<T>
-): Promise<T> {
+export async function withSpinner<T>(message: string, fn: () => Promise<T>): Promise<T> {
   start(message);
   try {
     const result = await fn();
