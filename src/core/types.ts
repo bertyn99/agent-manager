@@ -1,13 +1,13 @@
 // Core types for Agent Manager
 
 // Agent types
-export type AgentType = 
-  | 'claude-code' 
-  | 'cursor' 
-  | 'gemini-cli' 
-  | 'opencode' 
-  | 'vscode-copilot'
-  | 'openai-codex';
+export type AgentType =
+  | "claude-code"
+  | "cursor"
+  | "gemini-cli"
+  | "opencode"
+  | "vscode-copilot"
+  | "openai-codex";
 
 export interface AgentInfo {
   type: AgentType;
@@ -24,7 +24,7 @@ export interface DetectedAgent extends AgentInfo {
 }
 
 // Extension types (MCP servers, skills, commands, etc.)
-export type ExtensionType = 'mcp' | 'skill' | 'command' | 'agent';
+export type ExtensionType = "mcp" | "skill" | "command" | "agent";
 
 export interface Extension {
   name: string;
@@ -43,53 +43,42 @@ export interface UnifiedSkill {
   license?: string;
   version?: string;
   author?: string;
-  
+
   formats: {
-    // Agent Skills Spec (https://agentskills.io/specification)
     agentSkills?: {
       enabled: boolean;
-      path: string;  // Relative path to SKILL.md
+      path: string;
     };
-    
-    // MCP Servers (Claude Code, Cursor, Gemini)
     mcp?: {
       enabled: boolean;
-      type: 'http' | 'command';
+      type: "http" | "command";
       url?: string;
       command?: string;
       args?: string[];
       headers?: Record<string, string>;
     };
-    
-    // Gemini Commands (.toml)
     geminiCommand?: {
       enabled: boolean;
       name: string;
       description: string;
     };
-    
-    // Gemini Antigravity Agent
     geminiAgent?: {
       enabled: boolean;
       name: string;
       brain?: string;
     };
-    
-    // VS Code Extension
     vscode?: {
       enabled: boolean;
       id?: string;
       marketplace?: string;
       vsix?: string;
     };
-    
-    // OpenAI Codex (future)
     codex?: {
       enabled: boolean;
       format?: string;
     };
   };
-  
+
   content?: {
     readme?: string;
     prompt?: string;
@@ -97,16 +86,15 @@ export interface UnifiedSkill {
     scripts?: string[];
     assets?: string[];
   };
-  
+
   source?: {
-    type: 'git' | 'local' | 'http';
+    type: "git" | "local" | "http";
     repo?: string;
     path?: string;
-    pinned?: string | null;  // commit, tag, or null for latest
+    pinned?: string | null;
   };
 }
 
-// Configuration types
 export interface AgentManagerConfig {
   home: string;
   manifestPath: string;
@@ -121,7 +109,6 @@ export interface AgentConfig {
   skillsPath?: string;
 }
 
-// Command options
 export interface AddOptions {
   to?: AgentType[];
   only?: ExtensionType[];
@@ -148,15 +135,28 @@ export interface ListOptions {
   json?: boolean;
   verbose?: boolean;
   filter?: string;
+  search?: string;
+  sort?: string;
+  reverse?: boolean;
+  limit?: number;
+  origin?: string;
 }
 
-export interface UpgradeOptions {
-  all?: boolean;
-  force?: boolean;
-  commit?: string;
+export interface ConflictInfo {
+  extension: string;
+  agent: string;
+  existingConfig?: Record<string, unknown>;
+  proposedConfig?: Record<string, unknown>;
 }
 
-// Result types
+export interface RestoreOptions {
+  dryRun?: boolean;
+  agents?: string[];
+  includeDisabled?: boolean;
+  mergeStrategy?: "replace" | "merge";
+  preview?: boolean;
+}
+
 export interface OperationResult {
   success: boolean;
   agent: AgentType;
@@ -174,7 +174,6 @@ export interface SyncResult {
   results: OperationResult[];
 }
 
-// Git types
 export interface GitRepoInfo {
   url: string;
   org: string;
@@ -183,44 +182,80 @@ export interface GitRepoInfo {
   path: string;
 }
 
-// Manifest types (skills.yaml format)
-export interface SkillsManifest {
-  sources: ManifestSource[];
-  customized: string[];
-  local: string[];
-  disabled: string[];
-  upgraded: string[];
+export interface McpEntry {
+  agents: AgentType[];
+  config?: Record<string, unknown>;
 }
 
-export interface ManifestSource {
-  repo: string;
-  path: string;
-  nested: boolean;
-  branch: string;
-  pinned: string | null;
-  include: string[];
-  exclude: string[];
+export interface CommandEntry {
+  agents: AgentType[];
+  config?: Record<string, unknown>;
 }
 
-// New manifest v2.0.0 types (separate MCPs from Skills, group by origin)
-
-/**
- * New manifest structure (v2.0.0)
- * Separates MCP servers from skills and groups skills by origin repository
- */
-export interface NewAgentManagerManifest {
+export interface AgentManagerManifest {
   version: string;
   updated: string;
-  mcp: Record<string, {
-    agents: AgentType[];
-    config?: Record<string, unknown>;
-  }>;
+  mcp: Record<string, McpEntry>;
   skills: SkillOriginGroup[];
+  commands: Record<string, CommandEntry>;
 }
 
-/**
- * Group of skills from a single origin (remote repo or local)
- */
+export interface BackupAgentData {
+  installed: boolean;
+  configPath: string;
+  extensions: BackupExtension[];
+}
+
+export interface BackupExtension {
+  name: string;
+  type: "mcp" | "skill" | "command";
+  enabled: boolean;
+  config?: Record<string, unknown>;
+  source?: string;
+}
+
+export interface BackupResult {
+  success: boolean;
+  backupFile?: string;
+  extensionCount?: number;
+  error?: string;
+}
+
+export interface BackupMetadata {
+  version: string;
+  backedUpAt: string;
+  agents: Record<string, BackupAgentData>;
+}
+
+export interface BackupOptions {
+  outputPath?: string;
+  includeManifest?: boolean;
+  incremental?: boolean;
+  since?: string;
+  maxAge?: string;
+}
+
+export type Schedules = Record<string, Schedule>;
+
+export interface Schedule {
+  interval: string;
+  retention: number;
+  enabled: boolean;
+  lastRun?: string;
+}
+
+export interface SchedulerHandle {
+  id: string;
+  interval: string;
+  retention: number;
+  enabled: boolean;
+}
+
+export interface SchedulerState {
+  version: string;
+  schedules: Schedules;
+}
+
 export interface SkillOriginGroup {
   origin: string;
   path: string;
@@ -230,9 +265,6 @@ export interface SkillOriginGroup {
   skills: SkillEntry[];
 }
 
-/**
- * Individual skill within an origin group
- */
 export interface SkillEntry {
   name: string;
   folderName: string;
@@ -240,25 +272,11 @@ export interface SkillEntry {
   description?: string;
 }
 
-// Migration types (v1.0.0 -> v2.0.0)
-
-/**
- * Legacy manifest format (v1.0.0)
- */
-export interface LegacyManifest {
-  version: string;
-  updated: string;
-  skills: ManifestSkill[];
-  sources: ManifestSource[];
-}
-
-/**
- * Result of migration operation
- */
-export interface MigrationResult {
-  success: boolean;
-  migratedSkills: number;
-  migratedMcps: number;
-  migratedSources: number;
-  errors: string[];
+export interface OpenCodeSkill {
+  id: string;
+  description?: string;
+  installedAt?: string;
+  lastUsed?: string;
+  usageCount?: number;
+  version?: string;
 }

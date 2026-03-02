@@ -6,6 +6,9 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
     globals: true,
     environment: 'node',
+    testTimeout: 10000,
+    hookTimeout: 10000,
+    teardownTimeout: 5000,
     deps: {
       inline: ['fs-extra'],
     },
@@ -18,6 +21,21 @@ export default defineConfig({
         'src/cli/index.ts',
         'src/adapters/*.ts',
       ],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 75,
+        statements: 80,
+      },
+    },
+    fakeTimers: {
+      toFake: ['setTimeout', 'setInterval', 'Date'],
+    },
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
     },
   },
 });

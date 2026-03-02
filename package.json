@@ -1,6 +1,6 @@
 {
   "name": "agent-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Universal CLI to manage skills, agents, and commands across multiple AI coding assistants (Claude Code, Cursor, Gemini CLI, OpenCode, VS Code Copilot)",
   "type": "module",
   "main": "./dist/index.js",
@@ -49,36 +49,37 @@
   },
   "homepage": "https://github.com/bertyn99/agent-manager#readme",
   "dependencies": {
-    "citty": "^0.1.6",
     "c12": "^3.3.3",
+    "citty": "^0.2.0",
     "consola": "^3.4.2",
-    "pathe": "^2.0.3",
-    "execa": "^9.5.2",
-    "ofetch": "^1.4.1",
     "destr": "^2.0.3",
-    "ufo": "^1.5.4",
-    "mlly": "^1.7.3",
-    "std-env": "^3.8.0",
-    "fs-extra": "^11.2.0",
-    "simple-git": "^3.27.0",
-    "zod": "^3.24.2",
+    "execa": "^9.6.1",
+    "fs-extra": "^11.3.3",
+    "giget": "^3.1.2",
     "js-yaml": "^4.1.0",
-    "prompts": "^2.4.2"
+    "mlly": "^1.7.3",
+    "ofetch": "^1.5.1",
+    "pathe": "^2.0.3",
+    "prompts": "^2.4.2",
+    "smol-toml": "^1.6.0",
+    "std-env": "^3.8.0",
+    "ufo": "^1.5.4",
+    "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@oxfmt/linux-x64-gnu": "^0.27.0",
+    "@oxlint-tsgolint/linux-x64": "0.11.4",
     "@types/fs-extra": "^11.0.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.5",
     "@types/prompts": "^2.4.9",
+    "oxfmt": "^0.27.0",
+    "oxlint": "^1.42.0",
+    "tsdown": "^0.20.0",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.6",
-    "@oxfmt/linux-x64-gnu": "^0.26.0",
-    "@oxlint-tsgolint/linux-x64": "0.11.1",
-    "tsdown": "^0.10.2",
-    "oxlint": "^1.41.0",
-    "oxfmt": "^0.26.0"
+    "vitest": "^3.0.6"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

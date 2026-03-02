@@ -2,11 +2,14 @@ import { defineConfig } from 'tsdown';
 
 export default defineConfig({
   entry: ['src/cli/index.ts'],
-  format: ['esm', 'cjs'],
-  target: 'node18',
+  format: 'esm',
+  outExtensions() {
+    return { js: '.js' };
+  },
+  target: 'node20',
   platform: 'node',
-  external: ['fs-extra', 'simple-git', 'oxlint', 'oxfmt'],
-  dts: true,
+  external: ['fs-extra', 'giget', 'oxlint', 'oxfmt'],
+  dts: false,
   sourcemap: true,
-  clean: true,
+  clean: false,
 });

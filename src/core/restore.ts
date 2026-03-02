@@ -1,14 +1,14 @@
 /**
  * Restore Module - Phase 2 Feature
- * 
+ *
  * Imports extension configuration from JSON backup files.
  * Isolated implementation - no CLI dependencies.
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import type { BackupMetadata, BackupExtension } from './backup.js';
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+import type { BackupMetadata, BackupExtension } from "./backup.js";
 
 export interface RestoreOptions {
   dryRun?: boolean;
@@ -20,6 +20,7 @@ export interface RestoreResult {
   skipped?: number;
   failed?: number;
   errors?: string[];
+  conflicts?: ConflictInfo[];
 }
 
 /**
@@ -27,38 +28,38 @@ export interface RestoreResult {
  */
 export async function restoreFromBackup(
   backupFile: string,
-  options: RestoreOptions = {}
+  options: RestoreOptions = {},
 ): Promise<RestoreResult> {
   const errors: string[] = [];
-  
+
   try {
     // Validate backup file exists
     if (!existsSync(backupFile)) {
       return {
         success: false,
         failed: 0,
-        errors: [`Backup file not found: ${backupFile}`]
+        errors: [`Backup file not found: ${backupFile}`],
       };
     }
 
     // Read and parse backup
-    const content = readFileSync(backupFile, 'utf-8');
+    const content = readFileSync(backupFile, "utf-8");
     const backup: BackupMetadata = JSON.parse(content);
 
     // Validate backup format
-    if (!backup.version || backup.version !== '1.0.0') {
+    if (!backup.version || backup.version !== "1.0.0") {
       return {
         success: false,
         failed: 0,
-        errors: [`Invalid backup version: ${backup.version || 'missing'}`]
+        errors: [`Invalid backup version: ${backup.version || "missing"}`],
       };
     }
 
-    if (!backup.agents || typeof backup.agents !== 'object') {
+    if (!backup.agents || typeof backup.agents !== "object") {
       return {
         success: false,
         failed: 0,
-        errors: ['Invalid backup format: missing agents data']
+        errors: ["Invalid backup format: missing agents data"],
       };
     }
 
@@ -74,7 +75,7 @@ export async function restoreFromBackup(
         extensionsRestored: 0,
         skipped: extensionsToRestore,
         failed: 0,
-        errors: []
+        errors: [],
       };
     }
 
@@ -91,11 +92,13 @@ export async function restoreFromBackup(
           // 1. Checking if agent is installed
           // 2. Adding extension to agent's configuration
           // 3. Validating extension configuration
-          
+
           restored++;
         } catch (error) {
           failed++;
-          errors.push(`Failed to restore ${extension.name} to ${agentName}: ${error instanceof Error ? error.message : String(error)}`);
+          errors.push(
+            `Failed to restore ${extension.name} to ${agentName}: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
     }
@@ -105,14 +108,13 @@ export async function restoreFromBackup(
       extensionsRestored: restored,
       skipped: 0,
       failed,
-      errors: errors.length > 0 ? errors : undefined
+      errors: errors.length > 0 ? errors : undefined,
     };
-
   } catch (error) {
     return {
       success: false,
       failed: 0,
-      errors: [`Restore failed: ${error instanceof Error ? error.message : String(error)}`]
+      errors: [`Restore failed: ${error instanceof Error ? error.message : String(error)}`],
     };
   }
 }
@@ -132,11 +134,11 @@ export function previewRestore(backupFile: string): {
         agents: [],
         totalExtensions: 0,
         extensionsByAgent: {},
-        error: 'Backup file not found'
+        error: "Backup file not found",
       };
     }
 
-    const content = readFileSync(backupFile, 'utf-8');
+    const content = readFileSync(backupFile, "utf-8");
     const backup: BackupMetadata = JSON.parse(content);
 
     const agents = Object.keys(backup.agents);
@@ -152,15 +154,14 @@ export function previewRestore(backupFile: string): {
     return {
       agents,
       totalExtensions,
-      extensionsByAgent
+      extensionsByAgent,
     };
-
   } catch (error) {
     return {
       agents: [],
       totalExtensions: 0,
       extensionsByAgent: {},
-      error: `Failed to preview restore: ${error instanceof Error ? error.message : String(error)}`
+      error: `Failed to preview restore: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

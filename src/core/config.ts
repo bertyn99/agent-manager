@@ -1,36 +1,41 @@
 // Agent Manager Configuration
 // Supports JSON config files with environment variable overrides
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs-extra';
-import { join, dirname } from 'pathe';
-import { homedir } from 'os';
-import { z } from 'zod';
-import type { AgentManagerConfig } from './types.js';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, dirname } from "pathe";
+import { homedir } from "os";
+import { z } from "zod";
+import type { AgentManagerConfig } from "./types.js";
+import { load as yamlLoad } from "js-yaml";
 
 // Re-export validators
-export * from './validators.js';
+export * from "./validators.js";
 
 // Re-export types
 export type { AgentManagerConfig };
 
 // Configuration schema
 export const AgentManagerConfigSchema = z.object({
-  home: z.string().default('~/.config/agent-manager'),
-  manifestPath: z.string().default('~/.config/agent-manager/skills.yaml'),
-  skillsPath: z.string().default('~/.config/agent-manager/skill'),
-  vendorPath: z.string().default('~/.config/agent-manager/vendor'),
-  agents: z.record(z.object({
-    enabled: z.boolean().default(true),
-    configPath: z.string(),
-    skillsPath: z.string().optional(),
-  })).default({}),
+  home: z.string().default("~/.config/agent-manager"),
+  manifestPath: z.string().default("~/.config/agent-manager/manifest.yaml"),
+  skillsPath: z.string().default("~/.config/agent-manager/skill"),
+  vendorPath: z.string().default("~/.config/agent-manager/vendor"),
+  agents: z
+    .record(
+      z.object({
+        enabled: z.boolean().default(true),
+        configPath: z.string(),
+        skillsPath: z.string().optional(),
+      }),
+    )
+    .default({}),
 });
 
 /**
  * Expand ~ to home directory
  */
 function expandHome(path: string): string {
-  if (path.startsWith('~')) {
+  if (path.startsWith("~")) {
     return join(homedir(), path.slice(1));
   }
   return path;
@@ -40,42 +45,42 @@ function expandHome(path: string): string {
  * Get the default configuration
  */
 export function getDefaultConfig(): AgentManagerConfig {
-  const home = process.env.AGENT_MANAGER_HOME || join(homedir(), '.config', 'agent-manager');
+  const home = process.env.AGENT_MANAGER_HOME || join(homedir(), ".config", "agent-manager");
   const resolvedHome = expandHome(home);
-  
+
   return {
     home: resolvedHome,
-    manifestPath: join(resolvedHome, 'skills.yaml'),
-    skillsPath: join(resolvedHome, 'skill'),
-    vendorPath: join(resolvedHome, 'vendor'),
+    manifestPath: join(resolvedHome, "skills.yaml"),
+    skillsPath: join(resolvedHome, "skill"),
+    vendorPath: join(resolvedHome, "vendor"),
     agents: {
-      'claude-code': {
+      "claude-code": {
         enabled: true,
-        configPath: join(homedir(), '.claude', 'settings.json'),
-        skillsPath: join(homedir(), '.claude', 'skills'),
+        configPath: join(homedir(), ".claude", "settings.json"),
+        skillsPath: join(homedir(), ".claude", "skills"),
       },
-      'cursor': {
+      cursor: {
         enabled: true,
-        configPath: join(homedir(), '.cursor', 'mcp.json'),
-        skillsPath: join(homedir(), '.cursor', 'skills'),
+        configPath: join(homedir(), ".cursor", "mcp.json"),
+        skillsPath: join(homedir(), ".cursor", "skills"),
       },
-      'gemini-cli': {
+      "gemini-cli": {
         enabled: true,
-        configPath: join(homedir(), '.gemini', 'settings.json'),
-        skillsPath: join(homedir(), '.gemini', 'commands'),
+        configPath: join(homedir(), ".gemini", "settings.json"),
+        skillsPath: join(homedir(), ".gemini", "commands"),
       },
-      'opencode': {
+      opencode: {
         enabled: true,
-        configPath: join(homedir(), '.config', 'opencode', 'skills.yaml'),
-        skillsPath: join(homedir(), '.config', 'opencode', 'skill'),
+        configPath: join(homedir(), ".config", "opencode", "skills.yaml"),
+        skillsPath: join(homedir(), ".config", "opencode", "skill"),
       },
-      'vscode-copilot': {
+      "vscode-copilot": {
         enabled: true,
-        configPath: join(homedir(), '.vscode', 'copilot-agents.json'),
+        configPath: join(homedir(), ".vscode", "copilot-agents.json"),
       },
-      'openai-codex': {
+      "openai-codex": {
         enabled: true,
-        configPath: join(homedir(), '.codex', 'config.json'),
+        configPath: join(homedir(), ".codex", "config.json"),
       },
     },
   };
@@ -86,13 +91,13 @@ export function getDefaultConfig(): AgentManagerConfig {
  */
 export function loadConfigSync(configPath?: string): AgentManagerConfig {
   const path = configPath || getDefaultConfig().manifestPath;
-  
+
   if (!existsSync(path)) {
     return getDefaultConfig();
   }
-  
+
   try {
-    const content = readFileSync(path, 'utf-8');
+    const content = readFileSync(path, "utf-8");
     const parsed = JSON.parse(content);
     const result = AgentManagerConfigSchema.parse(parsed);
     // Ensure all required fields are present
@@ -105,7 +110,7 @@ export function loadConfigSync(configPath?: string): AgentManagerConfig {
       // Merge agents: use parsed if available, otherwise default
       agents: {
         ...defaultConfig.agents,
-        ...result.agents as Record<string, AgentConfig>,
+        ...(result.agents as Record<string, AgentConfig>),
       },
     };
   } catch {
@@ -128,7 +133,7 @@ export async function loadConfig(configPath?: string): Promise<AgentManagerConfi
 export function saveConfig(config: AgentManagerConfig): void {
   const path = config.manifestPath;
   const dir = dirname(path);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -166,7 +171,7 @@ export function ensureDirs(config: AgentManagerConfig): void {
     if (!existsSync(configDir)) {
       mkdirSync(configDir, { recursive: true });
     }
-    
+
     if (agentConfig.skillsPath && !existsSync(agentConfig.skillsPath)) {
       mkdirSync(agentConfig.skillsPath, { recursive: true });
     }

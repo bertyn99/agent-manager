@@ -1,8 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, readdirSync } from 'fs-extra';
-import { join, basename } from 'pathe';
-import { parse as parseToml } from 'destr';
-import type { AgentType } from './types.js';
-import { validateGeminiCommand } from './validators.js';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+  readdirSync,
+} from "node:fs";
+import { join, basename } from "pathe";
+import { parse as parseToml } from "smol-toml";
+import type { AgentType } from "./types.js";
+import { validateGeminiCommand } from "./validators.js";
 
 export interface CommandConfig {
   name: string;
@@ -10,7 +17,7 @@ export interface CommandConfig {
   prompt: string;
   args?: string[];
   totalBudget?: number;
-  output?: 'text' | 'json' | 'streaming';
+  output?: "text" | "json" | "streaming";
 }
 
 export interface CommandOperationResult {
@@ -31,19 +38,19 @@ export class CommandManager {
    * Returns validation result with warnings for special features
    */
   parseCommandFile(tomlPath: string): CommandConfig & { warnings: string[] } {
-    const content = readFileSync(tomlPath, 'utf-8');
+    const content = readFileSync(tomlPath, "utf-8");
     const toml = parseToml(content);
 
     const validation = validateGeminiCommand(toml);
 
     if (!validation.valid) {
-      throw new Error(`Invalid command file: ${validation.errors.join(', ')}`);
+      throw new Error(`Invalid command file: ${validation.errors.join(", ")}`);
     }
 
     return {
-      name: basename(tomlPath).replace('.toml', ''),
+      name: basename(tomlPath).replace(".toml", ""),
       description: validation.data?.description,
-      prompt: validation.data?.prompt || '',
+      prompt: validation.data?.prompt || "",
       args: validation.data?.args,
       totalBudget: validation.data?.totalBudget,
       output: validation.data?.output,
@@ -59,13 +66,13 @@ export class CommandManager {
     const validation = validateGeminiCommand(toml);
 
     if (!validation.valid) {
-      throw new Error(`Invalid command: ${validation.errors.join(', ')}`);
+      throw new Error(`Invalid command: ${validation.errors.join(", ")}`);
     }
 
     return {
       name,
       description: validation.data?.description,
-      prompt: validation.data?.prompt || '',
+      prompt: validation.data?.prompt || "",
       args: validation.data?.args,
       totalBudget: validation.data?.totalBudget,
       output: validation.data?.output,
@@ -84,28 +91,28 @@ export class CommandManager {
     }
 
     if (config.prompt) {
-      lines.push('');
+      lines.push("");
       lines.push('prompt = """');
       lines.push(this.escapeTomlString(config.prompt));
       lines.push('"""');
     }
 
     if (config.args && config.args.length > 0) {
-      lines.push('');
-      lines.push(`args = [${config.args.map(a => `"${this.escapeTomlString(a)}"`).join(', ')}]`);
+      lines.push("");
+      lines.push(`args = [${config.args.map((a) => `"${this.escapeTomlString(a)}"`).join(", ")}]`);
     }
 
     if (config.totalBudget !== undefined) {
-      lines.push('');
+      lines.push("");
       lines.push(`totalBudget = ${config.totalBudget}`);
     }
 
     if (config.output) {
-      lines.push('');
+      lines.push("");
       lines.push(`output = "${config.output}"`);
     }
 
-    return lines.join('\n') + '\n';
+    return lines.join("\n") + "\n";
   }
 
   /**
@@ -114,7 +121,7 @@ export class CommandManager {
   addCommand(
     config: CommandConfig,
     agentType: AgentType,
-    commandsPath: string
+    commandsPath: string,
   ): CommandOperationResult {
     const result: CommandOperationResult = {
       success: false,
@@ -133,7 +140,7 @@ export class CommandManager {
       });
 
       if (!validation.valid) {
-        result.error = validation.errors.join(', ');
+        result.error = validation.errors.join(", ");
         return result;
       }
 
@@ -159,11 +166,7 @@ export class CommandManager {
   /**
    * Remove a command from a specific agent
    */
-  removeCommand(
-    name: string,
-    agentType: AgentType,
-    commandsPath: string
-  ): CommandOperationResult {
+  removeCommand(name: string, agentType: AgentType, commandsPath: string): CommandOperationResult {
     const result: CommandOperationResult = {
       success: false,
       name,
@@ -197,7 +200,7 @@ export class CommandManager {
     }
 
     for (const file of readdirSync(commandsPath)) {
-      if (file.endsWith('.toml')) {
+      if (file.endsWith(".toml")) {
         try {
           const command = this.parseCommandFile(join(commandsPath, file));
           commands.push(command);
@@ -218,16 +221,12 @@ export class CommandManager {
 
     const shellMatches = prompt.match(/!\{[^}]+\}/g);
     if (shellMatches) {
-      warnings.push(
-        `Shell command detected: ${shellMatches[0]} - will require user confirmation`
-      );
+      warnings.push(`Shell command detected: ${shellMatches[0]} - will require user confirmation`);
     }
 
     const fileMatches = prompt.match(/@\{[^}]+\}/g);
     if (fileMatches) {
-      warnings.push(
-        `File injection detected: ${fileMatches[0]} - files will be read into context`
-      );
+      warnings.push(`File injection detected: ${fileMatches[0]} - files will be read into context`);
     }
 
     return warnings;
@@ -238,11 +237,11 @@ export class CommandManager {
    */
   private escapeTomlString(str: string): string {
     return str
-      .replace(/\\/g, '\\\\')
+      .replace(/\\/g, "\\\\")
       .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t");
   }
 }
 

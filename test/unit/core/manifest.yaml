@@ -1,8 +1,0 @@
-version: 1.0.0
-updated: '2026-01-21T22:32:03.465Z'
-skills: []
-sources:
-  - repo: https://github.com/test/repo
-    path: skills
-    branch: main
-    addedAt: '2026-01-21T22:32:03.465Z'

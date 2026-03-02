@@ -8,13 +8,14 @@ import {
   unlinkSync,
   rmSync,
   writeFileSync,
-} from 'fs-extra';
-import { join, dirname } from 'pathe';
-import { load as yamlLoad } from 'js-yaml';
-import { AgentAdapter, AgentType, DetectedAgent, Extension } from '../types.js';
-import { AgentManagerConfig } from '../config.js';
-import { transportValidator } from '../core/transport-validator.js';
-import { logger } from '../utils/logger.js';
+  symlinkSync,
+} from "node:fs";
+import { join, dirname } from "pathe";
+import { load as yamlLoad } from "js-yaml";
+import { AgentAdapter, AgentType, DetectedAgent, Extension } from "../types.js";
+import { AgentManagerConfig } from "../config.js";
+import { transportValidator } from "../core/transport-validator.js";
+import { logger } from "../utils/logger.js";
 
 interface OpenCodeMCPConfig {
   [serverName: string]: {
@@ -43,8 +44,8 @@ interface OpenCodeConfigFile {
  * - Directories for customized/local extensions
  */
 export class OpenCodeAdapter implements AgentAdapter {
-  readonly type: AgentType = 'opencode';
-  readonly name = 'OpenCode';
+  readonly type: AgentType = "opencode";
+  readonly name = "OpenCode";
 
   constructor(private config: AgentManagerConfig) {}
 
@@ -52,7 +53,7 @@ export class OpenCodeAdapter implements AgentAdapter {
    * Detect if OpenCode is installed
    */
   detect(): boolean {
-    const agentConfig = this.config.agents['opencode'];
+    const agentConfig = this.config.agents?.["opencode"];
     if (!agentConfig) {
       return false;
     }
@@ -63,22 +64,22 @@ export class OpenCodeAdapter implements AgentAdapter {
    * Get the manifest path for OpenCode
    */
   getManifestPath(): string {
-    return this.config.agents['opencode']?.configPath || '';
+    return this.config.agents?.["opencode"]?.configPath || "";
   }
 
   /**
    * Get the OpenCode config directory
    */
   getConfigDir(): string {
-    const configPath = this.config.agents['opencode']?.configPath;
-    return configPath ? dirname(configPath) : '';
+    const configPath = this.config.agents?.["opencode"]?.configPath;
+    return configPath ? dirname(configPath) : "";
   }
 
   /**
    * Get the MCP config file path (opencode.json)
    */
   getMCPConfigPath(): string {
-    return join(this.getConfigDir(), 'opencode.json');
+    return join(this.getConfigDir(), "opencode.json");
   }
 
   /**
@@ -91,11 +92,11 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
 
     try {
-      const content = readFileSync(mcpPath, 'utf-8');
+      const content = readFileSync(mcpPath, "utf-8");
       // Parse JSONC (allow comments) - only remove // at start of line (with optional whitespace)
       const jsonContent = content
-        .replace(/^\s*\/\/.*$/gm, '')  // Remove single-line comments only at line start
-        .replace(/\/\*[\s\S]*?\*\//g, '');  // Remove multi-line comments
+        .replace(/^\s*\/\/.*$/gm, "") // Remove single-line comments only at line start
+        .replace(/\/\*[\s\S]*?\*\//g, ""); // Remove multi-line comments
       return JSON.parse(jsonContent) as OpenCodeConfigFile;
     } catch {
       return null;
@@ -121,7 +122,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
 
     try {
-      const content = readFileSync(manifestPath, 'utf-8');
+      const content = readFileSync(manifestPath, "utf-8");
       return yamlLoad(content) as Record<string, unknown>;
     } catch {
       return null;
@@ -164,23 +165,25 @@ export class OpenCodeAdapter implements AgentAdapter {
   /**
    * Read and parse the .upstream file for customized extensions
    */
-  readUpstreamFile(extensionPath: string): { source: string; commit: string; customizedAt: string } | null {
-    const upstreamPath = join(extensionPath, '.upstream');
+  readUpstreamFile(
+    extensionPath: string,
+  ): { source: string; commit: string; customizedAt: string } | null {
+    const upstreamPath = join(extensionPath, ".upstream");
     if (!existsSync(upstreamPath)) {
       return null;
     }
 
     try {
-      const content = readFileSync(upstreamPath, 'utf-8');
+      const content = readFileSync(upstreamPath, "utf-8");
       const result: { source?: string; commit?: string; customized_at?: string } = {};
-      for (const line of content.split('\n')) {
-        const colonIndex = line.indexOf(':');
+      for (const line of content.split("\n")) {
+        const colonIndex = line.indexOf(":");
         if (colonIndex > 0) {
           const key = line.slice(0, colonIndex).trim();
           const value = line.slice(colonIndex + 1).trim();
-          if (key === 'source') result.source = value;
-          if (key === 'commit') result.commit = value;
-          if (key === 'customized_at') result.customizedAt = value;
+          if (key === "source") result.source = value;
+          if (key === "commit") result.commit = value;
+          if (key === "customized_at") result.customizedAt = value;
         }
       }
 
@@ -188,7 +191,7 @@ export class OpenCodeAdapter implements AgentAdapter {
         return {
           source: result.source,
           commit: result.commit,
-          customizedAt: result.customizedAt || '',
+          customizedAt: result.customizedAt || "",
         };
       }
     } catch {
@@ -201,9 +204,9 @@ export class OpenCodeAdapter implements AgentAdapter {
   /**
    * Determine the source type of an extension
    */
-  getExtensionSource(extensionPath: string): 'vendor' | 'local' | { repo: string; commit: string } {
+  getExtensionSource(extensionPath: string): "vendor" | "local" | { repo: string; commit: string } {
     if (this.isSymlink(extensionPath)) {
-      return 'vendor';
+      return "vendor";
     }
 
     const upstream = this.readUpstreamFile(extensionPath);
@@ -211,11 +214,11 @@ export class OpenCodeAdapter implements AgentAdapter {
       return { repo: upstream.source, commit: upstream.commit };
     }
 
-    return 'local';
+    return "local";
   }
 
   async listExtensions(): Promise<Extension[]> {
-    const agentConfig = this.config.agents['opencode'];
+    const agentConfig = this.config.agents?.["opencode"];
     const extensions: Extension[] = [];
 
     if (!agentConfig || !existsSync(agentConfig.skillsPath)) {
@@ -227,12 +230,13 @@ export class OpenCodeAdapter implements AgentAdapter {
     if (opencodeConfig?.mcp) {
       for (const [name, server] of Object.entries(opencodeConfig.mcp)) {
         // OpenCode uses type: "remote" with url, or command-based
-        const transportType = server.type === 'remote' ? 'http' : (server.command ? 'command' : 'http');
-        
+        const transportType =
+          server.type === "remote" ? "http" : server.command ? "command" : "http";
+
         extensions.push({
           name,
-          type: 'mcp',
-          agent: 'opencode',
+          type: "mcp",
+          agent: "opencode",
           description: `MCP server: ${name}`,
           config: {
             type: transportType,
@@ -272,13 +276,13 @@ export class OpenCodeAdapter implements AgentAdapter {
         continue;
       }
 
-      const skillMdPath = join(extensionPath, 'SKILL.md');
+      const skillMdPath = join(extensionPath, "SKILL.md");
       if (!existsSync(skillMdPath)) {
         continue;
       }
 
       // Read and parse SKILL.md
-      const content = readFileSync(skillMdPath, 'utf-8');
+      const content = readFileSync(skillMdPath, "utf-8");
       const frontmatter = this.parseFrontmatter(content);
 
       // Determine source type
@@ -286,12 +290,12 @@ export class OpenCodeAdapter implements AgentAdapter {
 
       extensions.push({
         name: frontmatter.name || dir,
-        type: 'skill' as const,
-        agent: 'opencode' as const,
+        type: "skill" as const,
+        agent: "opencode" as const,
         description: frontmatter.description,
         path: extensionPath,
         enabled: !customized.has(dir) && !local.has(dir),
-        source: typeof source === 'string' ? source : undefined,
+        source: typeof source === "string" ? source : undefined,
       });
     }
 
@@ -299,36 +303,36 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async addExtension(extension: Extension): Promise<void> {
-    const agentConfig = this.config.agents['opencode'];
+    const agentConfig = this.config.agents?.["opencode"];
 
     if (!agentConfig) {
-      throw new Error('OpenCode is not configured');
+      throw new Error("OpenCode is not configured");
     }
 
     // Handle MCP servers
-    if (extension.type === 'mcp' && extension.config) {
+    if (extension.type === "mcp" && extension.config) {
       const mcpConfig = extension.config as Record<string, unknown>;
-      const transportType = mcpConfig.type as string || 'command';
+      const transportType = (mcpConfig.type as string) || "command";
 
       // Validate transport type
       const validation = transportValidator.validateTransportType(transportType);
       if (!validation.valid) {
-        throw new Error(`Invalid MCP transport type: ${validation.errors.join(', ')}`);
+        throw new Error(`Invalid MCP transport type: ${validation.errors.join(", ")}`);
       }
 
       const config = this.readOpenCodeConfig() || { mcp: {} };
       config.mcp = config.mcp || {};
 
       // OpenCode MCP format: type: "remote" with url, or command-based
-      if (transportType === 'http' || transportType === 'sse' || transportType === 'websocket') {
+      if (transportType === "http" || transportType === "sse" || transportType === "websocket") {
         config.mcp[extension.name] = {
-          type: 'remote',
+          type: "remote",
           url: mcpConfig.url as string,
           enabled: extension.enabled,
         };
       } else {
         config.mcp[extension.name] = {
-          type: 'command',
+          type: "command",
           command: mcpConfig.command as string,
           args: mcpConfig.args as string[] | undefined,
           env: mcpConfig.env as Record<string, string> | undefined,
@@ -342,7 +346,7 @@ export class OpenCodeAdapter implements AgentAdapter {
 
     // Handle skills (existing logic)
     if (!extension.path) {
-      throw new Error('Extension path is required for OpenCode skills');
+      throw new Error("Extension path is required for OpenCode skills");
     }
 
     const targetPath = join(agentConfig.skillsPath, extension.name);
@@ -358,39 +362,44 @@ export class OpenCodeAdapter implements AgentAdapter {
     symlinkSync(extension.path, targetPath);
   }
 
-  async removeExtension(extensionName: string): Promise<void> {
-    const agentConfig = this.config.agents['opencode'];
+  async removeExtension(extensionName: string): Promise<boolean> {
+    const agentConfig = this.config.agents?.["opencode"];
 
     if (!agentConfig) {
-      return;
+      return false;
     }
 
     const extensionPath = join(agentConfig.skillsPath, extensionName);
+    let removed = false;
 
     // First, try to remove from MCP config
     const config = this.readOpenCodeConfig();
     if (config?.mcp?.[extensionName]) {
       delete config.mcp[extensionName];
       this.writeOpenCodeConfig(config);
-      return;
+      return true;
     }
 
     // Handle skills (existing logic)
     // Use lstatSync to check if the symlink/file itself exists (doesn't follow symlinks)
     if (!existsSync(extensionPath) && !this.isSymlink(extensionPath)) {
-      return;
+      return false;
     }
 
     // Handle symlinks
     if (this.isSymlink(extensionPath)) {
       unlinkSync(extensionPath);
+      removed = true;
     } else {
       // Handle directories (customized or local extensions)
       rmSync(extensionPath, { recursive: true });
+      removed = true;
     }
 
     // Update manifest to remove from customized if present
     this.removeFromCustomized(extensionName);
+
+    return removed;
   }
 
   /**
@@ -418,24 +427,24 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async getAgentInfo(): Promise<DetectedAgent> {
-    const agentConfig = this.config.agents['opencode'];
+    const agentConfig = this.config.agents?.["opencode"];
     const installed = agentConfig ? this.detect() : false;
     const extensions = installed ? await this.listExtensions() : [];
 
     if (!agentConfig) {
       return {
-        type: 'opencode',
-        name: 'OpenCode',
+        type: "opencode",
+        name: "OpenCode",
         installed: false,
-        configPath: '',
-        skillsPath: '',
+        configPath: "",
+        skillsPath: "",
         extensions: [],
       };
     }
 
     return {
-      type: 'opencode',
-      name: 'OpenCode',
+      type: "opencode",
+      name: "OpenCode",
       installed,
       configPath: agentConfig.configPath,
       skillsPath: agentConfig.skillsPath,
@@ -451,13 +460,13 @@ export class OpenCodeAdapter implements AgentAdapter {
     const match = content.match(/^---\n([\s\S]*?)\n---/);
 
     if (match) {
-      const lines = match[1].split('\n');
+      const lines = match[1].split("\n");
       for (const line of lines) {
-        const colonIndex = line.indexOf(':');
+        const colonIndex = line.indexOf(":");
         if (colonIndex > 0) {
           const key = line.slice(0, colonIndex).trim();
           const value = line.slice(colonIndex + 1).trim();
-          frontmatter[key] = value.replace(/^["']|["']$/g, '');
+          frontmatter[key] = value.replace(/^["']|["']$/g, "");
         }
       }
     }

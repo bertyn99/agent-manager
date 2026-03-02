@@ -1,11 +1,15 @@
 // Extension Remover - Handles removing extensions from different agents
 
-import { existsSync, unlinkSync } from 'fs-extra';
-import { join } from 'pathe';
-import { logger } from '../utils/logger.js';
-import { createAgentRegistry } from '../adapters/index.js';
-import type { AgentManagerConfig, AgentType } from '../core/types.js';
-import { removeExtensionFromManifest } from './manifest.js';
+import { existsSync, unlinkSync, rmSync } from "node:fs";
+import { join } from "pathe";
+import { logger } from "../utils/logger.js";
+import { createAgentRegistry } from "../adapters/index.js";
+import type { AgentManagerConfig, AgentType } from "../core/types.js";
+import {
+  removeExtensionFromManifest,
+  getSkillsByOrigin,
+  removeAllSkillsFromOrigin,
+} from "./manifest.js";
 
 export interface RemoveOptions {
   from?: AgentType[];
@@ -19,13 +23,21 @@ export interface RemoveResult {
   error?: string;
 }
 
+export interface RemoveRepoResult {
+  success: boolean;
+  repo: string;
+  removedSkills: string[];
+  removedFrom: AgentType[];
+  errors: string[];
+}
+
 /**
  * Remove an extension from agents
  */
 export async function removeExtension(
   extensionName: string,
   config: AgentManagerConfig,
-  options: RemoveOptions
+  options: RemoveOptions,
 ): Promise<RemoveResult> {
   const result: RemoveResult = {
     success: false,
@@ -34,10 +46,10 @@ export async function removeExtension(
   };
 
   // Determine target agents
-  const targetAgents = options.from || Object.keys(config.agents) as AgentType[];
-  
+  const targetAgents = options.from || (Object.keys(config.agents) as AgentType[]);
+
   logger.info(`Removing extension "${extensionName}"...`);
-  logger.info(`Target agents: ${targetAgents.join(', ')}`);
+  logger.info(`Target agents: ${targetAgents.join(", ")}`);
 
   // Remove from each target agent
   for (const agentType of targetAgents) {
@@ -47,7 +59,7 @@ export async function removeExtension(
     }
 
     const removed = await removeFromAgent(extensionName, agentType, config, options);
-    
+
     if (removed) {
       result.removedFrom.push(agentType);
       // Remove from manifest
@@ -60,7 +72,7 @@ export async function removeExtension(
   if (result.success) {
     logger.success(`Successfully removed from ${result.removedFrom.length} agent(s)`);
   } else {
-    result.error = 'Extension not found in any target agent';
+    result.error = "Extension not found in any target agent";
     logger.warn(result.error);
   }
 
@@ -74,11 +86,11 @@ async function removeFromAgent(
   extensionName: string,
   agentType: AgentType,
   config: AgentManagerConfig,
-  options: RemoveOptions
+  options: RemoveOptions,
 ): Promise<boolean> {
   const registry = createAgentRegistry(config);
   const adapter = registry.getAdapter(agentType);
-  
+
   if (!adapter) {
     logger.warn(`No adapter found for agent: ${agentType}`);
     return false;
@@ -95,11 +107,10 @@ async function removeFromAgent(
     logger.success(`Removed from ${agentType}`);
     return true;
   } catch {
-    // Check if it's a file-based extension (like OpenCode or Gemini CLI)
-    if (agentType === 'opencode') {
-      const agentConfig = config.agents['opencode'];
+    if (agentType === "opencode") {
+      const agentConfig = config.agents?.["opencode"];
       if (!agentConfig) {
-        return;
+        return false;
       }
 
       if (agentConfig.skillsPath) {
@@ -112,8 +123,8 @@ async function removeFromAgent(
       }
     }
 
-    if (agentType === 'gemini-cli') {
-      const agentConfig = config.agents['gemini-cli'];
+    if (agentType === "gemini-cli") {
+      const agentConfig = config.agents["gemini-cli"];
       if (agentConfig.skillsPath) {
         const extensionPath = join(agentConfig.skillsPath, `${extensionName}.toml`);
         if (existsSync(extensionPath)) {
@@ -126,4 +137,85 @@ async function removeFromAgent(
   }
 
   return false;
+}
+
+/**
+ * Remove all skills from a repository on all agents
+ */
+export async function removeAllFromRepo(
+  repo: string,
+  config: AgentManagerConfig,
+): Promise<RemoveRepoResult> {
+  const result: RemoveRepoResult = {
+    success: false,
+    repo,
+    removedSkills: [],
+    removedFrom: [],
+    errors: [],
+  };
+
+  logger.info(`Removing all skills from ${repo}...`);
+
+  const existingSkills = getSkillsByOrigin(config.home, repo);
+
+  if (existingSkills.length === 0) {
+    result.errors.push(`No skills found for origin: ${repo}`);
+    logger.warn(result.errors[0]);
+    return result;
+  }
+
+  logger.info(`Found ${existingSkills.length} skills to remove`);
+
+  const agentsSet = new Set<AgentType>();
+  for (const skill of existingSkills) {
+    for (const agent of skill.agents) {
+      agentsSet.add(agent);
+    }
+  }
+  result.removedFrom = Array.from(agentsSet);
+
+  const registry = createAgentRegistry(config);
+
+  for (const skill of existingSkills) {
+    for (const agent of skill.agents) {
+      try {
+        const adapter = registry.getAdapter(agent);
+
+        if (adapter && adapter.detect()) {
+          await adapter.removeExtension(skill.name);
+          logger.success(`Removed ${skill.name} from ${agent}`);
+        } else {
+          await removeFromAgent(skill.name, agent, config, {});
+        }
+
+        removeExtensionFromManifest(config.home, skill.name, agent);
+
+        if (!result.removedSkills.includes(skill.name)) {
+          result.removedSkills.push(skill.name);
+        }
+      } catch (error) {
+        result.errors.push(`Failed to remove ${skill.name} from ${agent}: ${error}`);
+      }
+    }
+  }
+
+  removeAllSkillsFromOrigin(config.home, repo);
+
+  result.success = result.removedSkills.length > 0 || existingSkills.length > 0;
+
+  if (result.success) {
+    if (result.removedSkills.length > 0) {
+      logger.success(
+        `Removed ${result.removedSkills.length} skills from ${result.removedFrom.length} agents`,
+      );
+    } else {
+      logger.info(
+        `Cleared ${existingSkills.length} orphaned skills from manifest (no agents assigned)`,
+      );
+    }
+  } else {
+    logger.error(`Failed to remove skills: ${result.errors.join(", ")}`);
+  }
+
+  return result;
 }

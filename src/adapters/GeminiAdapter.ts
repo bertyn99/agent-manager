@@ -1,10 +1,10 @@
-import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs-extra';
-import { join } from 'pathe';
-import { AgentAdapter, AgentType, DetectedAgent, Extension } from '../types.js';
-import { AgentManagerConfig } from '../config.js';
-import { commandManager, type CommandConfig } from '../core/command-manager.js';
-import { transportValidator } from '../core/transport-validator.js';
-import { logger } from '../utils/logger.js';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from "node:fs";
+import { join } from "pathe";
+import { AgentAdapter, AgentType, DetectedAgent, Extension } from "../types.js";
+import { AgentManagerConfig } from "../config.js";
+import { commandManager, type CommandConfig } from "../core/command-manager.js";
+import { transportValidator } from "../core/transport-validator.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * Gemini CLI Adapter
@@ -14,31 +14,31 @@ import { logger } from '../utils/logger.js';
  * - Commands in ~/.gemini/commands/*.toml
  */
 export class GeminiAdapter implements AgentAdapter {
-  readonly type: AgentType = 'gemini-cli';
-  readonly name = 'Gemini CLI';
+  readonly type: AgentType = "gemini-cli";
+  readonly name = "Gemini CLI";
 
   constructor(private config: AgentManagerConfig) {}
 
   detect(): boolean {
-    const agentConfig = this.config.agents['gemini-cli'];
+    const agentConfig = this.config.agents["gemini-cli"];
     return existsSync(agentConfig.configPath);
   }
 
   async listExtensions(): Promise<Extension[]> {
-    const agentConfig = this.config.agents['gemini-cli'];
+    const agentConfig = this.config.agents["gemini-cli"];
     const extensions: Extension[] = [];
 
     // List MCP servers from settings.json
     if (existsSync(agentConfig.configPath)) {
       try {
-        const settings = JSON.parse(readFileSync(agentConfig.configPath, 'utf-8'));
+        const settings = JSON.parse(readFileSync(agentConfig.configPath, "utf-8"));
         const mcpServers = settings.mcpServers || {};
 
         for (const [name, cfg] of Object.entries(mcpServers)) {
           extensions.push({
             name,
-            type: 'mcp',
-            agent: 'gemini-cli',
+            type: "mcp",
+            agent: "gemini-cli",
             description: `MCP server: ${name}`,
             config: cfg as Record<string, unknown>,
             enabled: true,
@@ -57,9 +57,9 @@ export class GeminiAdapter implements AgentAdapter {
       for (const cmd of commands) {
         extensions.push({
           name: cmd.name,
-          type: 'command',
-          agent: 'gemini-cli',
-          description: cmd.description || 'Gemini command',
+          type: "command",
+          agent: "gemini-cli",
+          description: cmd.description || "Gemini command",
           config: {
             description: cmd.description,
             prompt: cmd.prompt,
@@ -76,50 +76,47 @@ export class GeminiAdapter implements AgentAdapter {
   }
 
   async addExtension(extension: Extension): Promise<void> {
-    const agentConfig = this.config.agents['gemini-cli'];
+    const agentConfig = this.config.agents["gemini-cli"];
 
     // Add MCP server to settings.json with validation
-    if (extension.type === 'mcp' && extension.config) {
+    if (extension.type === "mcp" && extension.config) {
       // Validate MCP config before storing
       const mcpConfig = extension.config as Record<string, unknown>;
-      const transportType = mcpConfig.type as string || 'http';
+      const transportType = (mcpConfig.type as string) || "http";
 
       const validation = transportValidator.validateTransportType(transportType);
       if (!validation.valid) {
-        throw new Error(`Invalid MCP transport type: ${validation.errors.join(', ')}`);
+        throw new Error(`Invalid MCP transport type: ${validation.errors.join(", ")}`);
       }
 
       const settings = existsSync(agentConfig.configPath)
-        ? JSON.parse(readFileSync(agentConfig.configPath, 'utf-8'))
+        ? JSON.parse(readFileSync(agentConfig.configPath, "utf-8"))
         : { mcpServers: {} };
 
       settings.mcpServers = settings.mcpServers || {};
       settings.mcpServers[extension.name] = extension.config;
 
-      writeFileSync(
-        agentConfig.configPath,
-        JSON.stringify(settings, null, 2)
-      );
+      writeFileSync(agentConfig.configPath, JSON.stringify(settings, null, 2));
     }
 
     // Add command to commands/ directory using CommandManager
-    if (extension.type === 'command' && extension.config) {
+    if (extension.type === "command" && extension.config) {
       const commandsPath = agentConfig.skillsPath;
       if (!commandsPath) {
-        throw new Error('Gemini commands path not configured');
+        throw new Error("Gemini commands path not configured");
       }
 
       const config = extension.config as Record<string, unknown>;
       const commandConfig: CommandConfig = {
         name: extension.name,
         description: config.description as string,
-        prompt: (config.prompt as string) || '',
+        prompt: (config.prompt as string) || "",
         args: config.args as string[] | undefined,
         totalBudget: config.totalBudget as number | undefined,
-        output: config.output as 'text' | 'json' | 'streaming' | undefined,
+        output: config.output as "text" | "json" | "streaming" | undefined,
       };
 
-      const result = commandManager.addCommand(commandConfig, 'gemini-cli', commandsPath);
+      const result = commandManager.addCommand(commandConfig, "gemini-cli", commandsPath);
 
       if (!result.success) {
         throw new Error(result.error);
@@ -135,12 +132,12 @@ export class GeminiAdapter implements AgentAdapter {
   }
 
   async removeExtension(extensionName: string): Promise<void> {
-    const agentConfig = this.config.agents['gemini-cli'];
+    const agentConfig = this.config.agents["gemini-cli"];
 
     // Remove MCP server from settings.json
     if (existsSync(agentConfig.configPath)) {
       try {
-        const settings = JSON.parse(readFileSync(agentConfig.configPath, 'utf-8'));
+        const settings = JSON.parse(readFileSync(agentConfig.configPath, "utf-8"));
         delete settings.mcpServers?.[extensionName];
         writeFileSync(agentConfig.configPath, JSON.stringify(settings, null, 2));
       } catch {
@@ -151,7 +148,7 @@ export class GeminiAdapter implements AgentAdapter {
     // Remove command from commands/ directory using CommandManager
     const commandsPath = agentConfig.skillsPath;
     if (commandsPath) {
-      const result = commandManager.removeCommand(extensionName, 'gemini-cli', commandsPath);
+      const result = commandManager.removeCommand(extensionName, "gemini-cli", commandsPath);
 
       if (!result.success && result.error) {
         logger.warn(`Failed to remove command: ${result.error}`);
@@ -160,13 +157,13 @@ export class GeminiAdapter implements AgentAdapter {
   }
 
   async getAgentInfo(): Promise<DetectedAgent> {
-    const agentConfig = this.config.agents['gemini-cli'];
+    const agentConfig = this.config.agents["gemini-cli"];
     const installed = this.detect();
     const extensions = installed ? await this.listExtensions() : [];
 
     return {
-      type: 'gemini-cli',
-      name: 'Gemini CLI',
+      type: "gemini-cli",
+      name: "Gemini CLI",
       installed,
       configPath: agentConfig.configPath,
       skillsPath: agentConfig.skillsPath,
@@ -175,12 +172,12 @@ export class GeminiAdapter implements AgentAdapter {
   }
 
   getAgentInfoSync(): DetectedAgent {
-    const agentConfig = this.config.agents['gemini-cli'];
+    const agentConfig = this.config.agents["gemini-cli"];
     const installed = this.detect();
 
     return {
-      type: 'gemini-cli',
-      name: 'Gemini CLI',
+      type: "gemini-cli",
+      name: "Gemini CLI",
       installed,
       configPath: agentConfig.configPath,
       skillsPath: agentConfig.skillsPath,

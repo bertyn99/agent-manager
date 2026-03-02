@@ -3,10 +3,10 @@
  * Handles plugin.json manifest parsing and skill discovery
  */
 
-import { existsSync, readFileSync } from 'fs-extra';
-import { join } from 'pathe';
-import { parse as parseJsonc } from 'destr';
-import prompts from 'prompts';
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "pathe";
+import destr from "destr";
+import prompts from "prompts";
 
 export interface PluginManifest {
   name: string;
@@ -41,10 +41,10 @@ export function parsePluginManifest(path: string): PluginManifest | null {
   }
 
   try {
-    const content = readFileSync(path, 'utf-8');
+    const content = readFileSync(path, "utf-8");
     // Support JSONC with comments
-    const manifest = parseJsonc(content) as PluginManifest;
-    
+    const manifest = destr(content) as PluginManifest;
+
     if (!manifest.name) {
       return null;
     }
@@ -62,13 +62,13 @@ export function detectPlugins(repoPath: string): DetectedPlugin[] {
   const plugins: DetectedPlugin[] = [];
 
   // Check for root plugin.json
-  const rootPluginPath = join(repoPath, 'plugin.json');
+  const rootPluginPath = join(repoPath, "plugin.json");
   const rootManifest = parsePluginManifest(rootPluginPath);
   if (rootManifest) {
-    const skillsPath = rootManifest.skills 
-      ? join(repoPath, rootManifest.skills) 
-      : join(repoPath, 'skills');
-    
+    const skillsPath = rootManifest.skills
+      ? join(repoPath, rootManifest.skills)
+      : join(repoPath, "skills");
+
     plugins.push({
       name: rootManifest.name,
       path: repoPath,
@@ -78,14 +78,14 @@ export function detectPlugins(repoPath: string): DetectedPlugin[] {
   }
 
   // Check for .claude-plugin folder
-  const claudePluginPath = join(repoPath, '.claude-plugin');
+  const claudePluginPath = join(repoPath, ".claude-plugin");
   if (existsSync(claudePluginPath)) {
-    const manifest = parsePluginManifest(join(claudePluginPath, 'plugin.json'));
+    const manifest = parsePluginManifest(join(claudePluginPath, "plugin.json"));
     if (manifest) {
-      const skillsPath = manifest.skills 
-        ? join(claudePluginPath, manifest.skills) 
-        : join(claudePluginPath, 'skills');
-      
+      const skillsPath = manifest.skills
+        ? join(claudePluginPath, manifest.skills)
+        : join(claudePluginPath, "skills");
+
       plugins.push({
         name: manifest.name,
         path: claudePluginPath,
@@ -96,18 +96,18 @@ export function detectPlugins(repoPath: string): DetectedPlugin[] {
   }
 
   // Check for plugins/ subdirectories
-  const pluginsPath = join(repoPath, 'plugins');
+  const pluginsPath = join(repoPath, "plugins");
   if (existsSync(pluginsPath)) {
     const pluginDirs = getSubdirectories(pluginsPath);
     for (const dir of pluginDirs) {
       const pluginPath = join(pluginsPath, dir);
-      const manifest = parsePluginManifest(join(pluginPath, 'plugin.json'));
-      
+      const manifest = parsePluginManifest(join(pluginPath, "plugin.json"));
+
       if (manifest) {
-        const skillsPath = manifest.skills 
-          ? join(pluginPath, manifest.skills) 
-          : join(pluginPath, 'skills');
-        
+        const skillsPath = manifest.skills
+          ? join(pluginPath, manifest.skills)
+          : join(pluginPath, "skills");
+
         plugins.push({
           name: manifest.name,
           path: pluginPath,
@@ -126,10 +126,8 @@ export function detectPlugins(repoPath: string): DetectedPlugin[] {
  */
 function getSubdirectories(path: string): string[] {
   try {
-    const entries = require('fs').readdirSync(path, { withFileTypes: true });
-    return entries
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name);
+    const entries = require("fs").readdirSync(path, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch {
     return [];
   }
@@ -155,10 +153,10 @@ export async function promptPluginSelection(plugins: DetectedPlugin[]): Promise<
   }
 
   const response = await prompts({
-    type: 'multiselect',
-    name: 'plugins',
-    message: 'Select plugins to install:',
-    options: plugins.map(p => ({
+    type: "multiselect",
+    name: "plugins",
+    message: "Select plugins to install:",
+    options: plugins.map((p) => ({
       title: `${p.name} (${p.skills.length} skills)`,
       value: p.name,
       description: p.manifest.description,
@@ -181,10 +179,10 @@ export async function promptSkillSelection(plugin: DetectedPlugin): Promise<stri
   }
 
   const response = await prompts({
-    type: 'multiselect',
-    name: 'skills',
+    type: "multiselect",
+    name: "skills",
     message: `Select skills to install from "${plugin.name}":`,
-    options: plugin.skills.map(skill => ({
+    options: plugin.skills.map((skill) => ({
       title: skill,
       value: skill,
     })),
@@ -198,10 +196,10 @@ export async function promptSkillSelection(plugin: DetectedPlugin): Promise<stri
  */
 export async function detectAndSelectPlugins(
   repoPath: string,
-  options?: { include?: string[]; exclude?: string[] }
+  options?: { include?: string[]; exclude?: string[] },
 ): Promise<PluginDetectionResult> {
   const plugins = detectPlugins(repoPath);
-  
+
   if (plugins.length === 0) {
     return { isPluginRepo: false, plugins: [] };
   }
@@ -209,10 +207,10 @@ export async function detectAndSelectPlugins(
   // Filter plugins based on include/exclude
   let filteredPlugins = plugins;
   if (options?.include?.length) {
-    filteredPlugins = plugins.filter(p => options.include!.includes(p.name));
+    filteredPlugins = plugins.filter((p) => options.include!.includes(p.name));
   }
   if (options?.exclude?.length) {
-    filteredPlugins = filteredPlugins.filter(p => !options.exclude!.includes(p.name));
+    filteredPlugins = filteredPlugins.filter((p) => !options.exclude!.includes(p.name));
   }
 
   // If filtered to single plugin and has skills, and no filters specified, prompt
@@ -229,12 +227,12 @@ export async function detectAndSelectPlugins(
   if (shouldPrompt && filteredPlugins.length > 0) {
     selectedPlugins = await promptPluginSelection(filteredPlugins);
   } else {
-    selectedPlugins = filteredPlugins.map(p => p.name);
+    selectedPlugins = filteredPlugins.map((p) => p.name);
   }
 
   // For each selected plugin, prompt for skills
   for (const pluginName of selectedPlugins) {
-    const plugin = plugins.find(p => p.name === pluginName);
+    const plugin = plugins.find((p) => p.name === pluginName);
     if (plugin && plugin.skills.length > 0) {
       if (shouldPrompt) {
         selectedSkills[pluginName] = await promptSkillSelection(plugin);

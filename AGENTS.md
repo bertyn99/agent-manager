@@ -1,403 +1,111 @@
-# AGENTS.md - Agent Manager Development Guide
+# PROJECT KNOWLEDGE BASE
 
-This file provides guidelines for AI coding agents working on the agent-manager project.
+**Generated:** Sun Feb 01 2026 10:02:20 AM
+**Commit:** aa57053
+**Branch:** main
 
-## Project Overview
+## OVERVIEW
+Universal CLI tool managing extensions (MCP servers, skills, commands) across multiple AI coding assistants (Claude Code, Cursor, Gemini CLI, OpenCode). Built with TypeScript, uses UnJS ecosystem (citty, consola, pathe, tsdown).
 
-**agent-manager** is a universal CLI tool that manages extensions (MCP servers, skills, commands) across multiple AI coding assistants including Claude Code, Cursor, Gemini CLI, and OpenCode. Built with TypeScript, it uses the UnJS ecosystem (citty, consola, pathe, etc.).
-
-## Build, Lint, and Test Commands
-
-### Core Commands
-
-```bash
-# Install dependencies (uses pnpm)
-pnpm install
-
-# Build the project (tsdown bundler)
-pnpm build
-
-# Development mode with watch
-pnpm dev
-
-# Run all tests
-pnpm test
-
-# Run tests with coverage
-pnpm test -- --coverage
-
-# Run a single test file
-pnpm test src/core/core.test.ts
-
-# Run a specific test
-pnpm test -- --testNamePattern="detect agents"
-
-# Lint the codebase
-pnpm lint
-
-# Format code
-pnpm format
-```
-
-### Running Specific Tests
-
-Vitest supports various filtering options:
-
-```bash
-# Run tests matching a pattern
-pnpm test -- --testNamePattern="adapter"
-
-# Run tests in a specific directory
-pnpm test test/unit/
-
-# Run tests with verbose output
-pnpm test -- --reporter=verbose
-
-# Run tests without watch mode
-pnpm test -- --run
-```
-
-## Code Style Guidelines
-
-### Imports and Module Syntax
-
-- Use ES modules with `.ts` extension in import paths for clarity and consistency with source files
-
-```typescript
-// ✅ Correct
-import { existsSync } from 'fs-extra';
-import { join } from 'pathe';
-import { logger } from '../utils/logger.ts';
-import type { AgentType } from '../core/types.ts';
-
-// ❌ Incorrect
-import { existsSync } from 'fs-extra';
-import { join } from 'pathe';
-import { logger } from '../utils/logger';
-import type { AgentType } from '../core/types';
-```
-
-- Organize imports in this order: external dependencies, internal modules, types
-- Use named exports for most exports; default exports only for main classes
-
-### File Naming Conventions
-
-| Pattern | Example | Usage |
-|---------|---------|-------|
-| `PascalCase.ts` | `ClaudeAdapter.ts` | Classes, adapters, interfaces |
-| `kebab-case.ts` | `skill-installer.ts` | Utility functions, business logic |
-| `*.test.ts` | `core.test.ts` | Test files (same name as source) |
-
-### Directory Structure
+## STRUCTURE
 
 ```
-src/
-├── cli/           # Command definitions and handlers
-├── core/          # Business logic (installation, sync, config)
-├── adapters/      # Agent-specific implementations
-├── utils/         # Shared utilities (logger, git, paths)
-└── index.ts       # Main entry point
+agent-manager/
+├── src/
+│   ├── cli/       # Command definitions & handlers (2 files, 1330 lines in index.ts)
+│   ├── core/      # Business logic, manifest, config (24 files, complex)
+│   ├── adapters/  # Agent-specific implementations (5 files)
+│   └── utils/     # Shared utilities (git, logger, paths) (3 files)
+├── test/           # Test fixtures & environment setup
+├── dist/          # Build output (ESM + CJS)
+└── scripts/        # Setup scripts
 ```
 
-### TypeScript Conventions
+## WHERE TO LOOK
 
-- Enable strict mode (configured in tsconfig.json)
-- Use explicit types for function parameters and return types
-- Prefer interfaces for object shapes, types for unions/primitives
-- Use `Record<string, T>` instead of plain objects for maps
+| Task | Location | Notes |
+|------|----------|-------|
+| CLI entry point | src/cli/index.ts | 1330 lines, all command definitions |
+| Core business logic | src/core/ | installation, sync, manifest, config |
+| Agent adapters | src/adapters/ | ClaudeAdapter, CursorAdapter, GeminiAdapter, OpenCodeAdapter |
+| Type definitions | src/core/types.ts | AgentType, ExtensionType, interfaces |
+| Manifest tracking | src/core/manifest.ts | 1175 lines, skill installation state |
+| Git operations | src/utils/git.ts | cloneRepo, getCurrentCommit, getLatestTag, parseRepoUrl |
+| Config validation | src/core/validators.ts | Zod schemas for config, skills, Gemini commands |
+| Transport validation | src/core/transport-validator.ts | MCP server transport types (stdio, http, sse, websocket) |
+| Path utilities | src/utils/paths.ts | POSIX-style paths for cross-platform consistency |
+
+## CODE MAP
+
+| Symbol | Type | Location | Refs | Role |
+|--------|------|----------|------|------|
+| AgentType | type | types.ts | 13 imports | Union type for all supported agents |
+| Extension | interface | types.ts | 40+ imports | Base interface for MCP servers, skills, commands |
+| AgentManagerConfig | interface | config.ts | 5 imports | Configuration structure for CLI |
+| AgentAdapter | interface | types.ts | 5 adapters | Base interface all agents must implement |
+| createAgentRegistry | function | adapters/index.ts | 4 imports | Registry factory managing all adapters |
+| loadConfigSync | function | config.ts | 7 imports | Synchronous config loading with defaults |
+| readManifest | function | manifest.ts | 8 imports | Read agent-manager manifest from YAML |
+| cloneRepo | function | git.ts | 3 imports | Git repository cloning with branch/depth options |
+| parseRepoUrl | function | git.ts | 1 import | Parse git URL into org/repo/branch/path |
+| defineCommand | function | citty | 1 import | CLI command definition factory |
+| logger | object | utils/logger.ts | 229 uses | Consola logging instance |
+
+## CONVENTIONS
+
+- Use `.ts` extensions in all import paths (ESM convention)
+- Prefer named exports over default exports
+- Use Record<string, T> instead of plain objects for maps
 - Use `unknown` instead of `any`; handle type narrowing
+- Use async/await over Promise chains; use Promise.all() for parallel operations
+- Use Zod schemas for configuration and validation
+- POSIX-style paths (forward slashes) for cross-platform consistency
+- PascalCase for classes/interfaces, kebab-case for utilities
+- Test files alongside source with `.test.ts` suffix
 
-```typescript
-// ✅ Correct
-interface Extension {
-  name: string;
-  type: ExtensionType;
-  agent: AgentType;
-  description?: string;
-  config?: Record<string, unknown>;
-}
+## ANTI-PATTERNS (THIS PROJECT)
 
-function addExtension(repo: string, config: Config): Promise<Result> {
-  // implementation
-}
+- **Unvalidated config**: Always validate with Zod schemas before using config objects
+- **Empty catch blocks**: All catch blocks must handle errors (never silent failures)
+- **Type assertions without guards**: Avoid `as any` - use proper type narrowing
+- **Synchronous git operations**: Git operations should be async (simple-git is async-first)
+- **Direct filesystem operations**: Use fs-extra or pathe utilities, not native fs
+- **Missing error context**: All thrown errors must include context (what operation failed)
 
-// ❌ Incorrect
-interface Extension {
-  name: string;
-  type: string;
-  agent: string;
-  description?: string;
-  config?: any;
-}
+## UNIQUE STYLES
 
-function addExtension(repo, config) {
-  // implementation
-}
+- **Adapter pattern**: Each AI agent has a dedicated adapter implementing AgentAdapter interface
+- **Registry pattern**: createAgentRegistry() manages all adapters, provides unified detection/listing
+- **Result objects**: All operations return structured { success, error, ... } objects
+- **Manifest-based tracking**: agent-manager tracks installations in manifest.yaml separate from agent configs
+- **Progress spinners**: withSpinner() utility wraps long-running operations with start/success/error
+
+## COMMANDS
+
+```bash
+# Development
+pnpm install
+pnpm dev          # Watch mode
+
+# Build
+pnpm build         # tsdown bundler (ESM + CJS)
+
+# Testing
+pnpm test          # Run all tests
+pnpm test src/core/core.test.ts  # Single test file
+pnpm test -- --testNamePattern="detect"  # Pattern match
+pnpm test -- --run   # Without watch mode
+
+# Linting
+pnpm lint          # oxlint
+pnpm format        # oxfmt --write src/
 ```
 
-### Naming Conventions
+## NOTES
 
-| Type | Convention | Example |
-|------|------------|---------|
-| Variables | camelCase | `configPath`, `installedExtensions` |
-| Constants | SCREAMING_SNAKE_CASE | `DEFAULT_CONFIG_PATH` |
-| Functions | camelCase | `detectAgents()`, `loadConfigSync()` |
-| Classes | PascalCase | `ClaudeAdapter`, `AgentRegistry` |
-| Interfaces | PascalCase | `AgentConfig`, `Extension` |
-| Types | PascalCase | `AgentType`, `ExtensionType` |
-| Files | kebab-case (utilities), PascalCase (classes) | `skill-installer.ts`, `ClaudeAdapter.ts` |
-
-### Error Handling
-
-- Use try/catch with proper error messages
-- Propagate errors with context using `Error()` objects
-- Use `logger.error()` for user-facing errors
-- Validate inputs using Zod schemas (see `src/core/validators.ts`)
-
-```typescript
-// ✅ Correct
-try {
-  const config = readJSONSync(configPath);
-  return parseConfig(config);
-} catch (error) {
-  throw new Error(`Failed to load config: ${String(error)}`);
-}
-
-// Validation with Zod
-import { z } from 'zod';
-const ConfigSchema = z.object({
-  home: z.string(),
-  agents: z.record(z.object({ enabled: z.boolean() })),
-});
-```
-
-### Async/Await Patterns
-
-- Prefer async/await over Promise chains
-- Use `await` at top level or handle errors properly
-- Use `Promise.all()` for parallel operations
-
-```typescript
-// ✅ Correct
-async function listExtensions(): Promise<Extension[]> {
-  const extensions: Extension[] = [];
-  for (const adapter of adapters.values()) {
-    if (adapter.detect()) {
-      extensions.push(...(await adapter.listExtensions()));
-    }
-  }
-  return extensions;
-}
-
-// Parallel execution
-const results = await Promise.all([
-  adapter1.listExtensions(),
-  adapter2.listExtensions(),
-]);
-```
-
-### Configuration
-
-- Use Zod schemas for configuration validation (see `src/core/config.ts`)
-- Support environment variable overrides
-- Provide sensible defaults
-
-```typescript
-import { z } from 'zod';
-
-export const AgentManagerConfigSchema = z.object({
-  home: z.string().default('~/.config/agent-manager'),
-  manifestPath: z.string().default('~/.config/agent-manager/skills.yaml'),
-  skillsPath: z.string().default('~/.config/agent-manager/skill'),
-  vendorPath: z.string().default('~/.config/agent-manager/vendor'),
-  agents: z.record(z.object({
-    enabled: z.boolean().default(true),
-    configPath: z.string(),
-    skillsPath: z.string().optional(),
-  })).default({}),
-});
-
-export function loadConfigSync(configPath?: string): AgentManagerConfig {
-  const path = configPath || getDefaultConfig().manifestPath;
-  
-  if (!existsSync(path)) {
-    return getDefaultConfig();
-  }
-  
-  try {
-    const content = readFileSync(path, 'utf-8');
-    const parsed = JSON.parse(content);
-    return AgentManagerConfigSchema.parse(parsed);
-  } catch {
-    return getDefaultConfig();
-  }
-}
-```
-
-### Progress Spinners
-
-Use the `withSpinner` utility for operations that may take time:
-
-```typescript
-import { withSpinner } from '../utils/logger.ts';
-
-const result = await withSpinner('Installing extension', async () => {
-  // Long-running operation
-  return await installExtension(repo, config);
-});
-```
-
-### CLI Development
-
-- Use `citty` for command definition (see `src/cli/index.ts`)
-- Define commands with `defineCommand()` meta and args
-- Use positional arguments for required inputs, named flags for options
-
-```typescript
-import { defineCommand, runMain } from 'citty';
-
-const addCommand = defineCommand({
-  meta: {
-    name: 'add',
-    description: 'Add an extension from a repository',
-  },
-  args: {
-    repo: {
-      type: 'positional',
-      description: 'Repository URL or path',
-      required: true,
-    },
-    to: {
-      type: 'string',
-      description: 'Add to specific agents',
-    },
-    dryRun: {
-      type: 'boolean',
-      description: 'Preview changes without applying',
-      alias: 'd',
-    },
-  },
-  run({ args }) {
-    // Implementation
-  },
-});
-
-runMain(mainCommand);
-```
-
-### Transport Validation
-
-When adding MCP servers, validate transport types:
-
-```typescript
-import { validateTransport } from '../core/transport-validator.ts';
-
-const transportTypes = ['stdio', 'http', 'sse', 'websocket'] as const;
-
-function validateMCPTransport(
-  type: string,
-  options: { command?: string; url?: string }
-): { valid: boolean; error?: string } {
-  if (!transportTypes.includes(type as any)) {
-    return { valid: false, error: `Invalid transport type: ${type}` };
-  }
-  if (type === 'stdio' && !options.command) {
-    return { valid: false, error: 'command is required for stdio transport' };
-  }
-  if ((type === 'http' || type === 'sse' || type === 'websocket') && !options.url) {
-    return { valid: false, error: 'url is required for HTTP/SSE/WebSocket transports' };
-  }
-  return { valid: true };
-}
-```
-
-## Key Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `citty` | CLI framework with argument parsing |
-| `consola` | Elegant console logging |
-| `pathe` | Path utilities |
-| `fs-extra` | Enhanced file system operations |
-| `zod` | Schema validation |
-| `js-yaml` | YAML parsing/writing |
-| `execa` | Process execution |
-| `simple-git` | Git operations |
-| `c12` | Config loading |
-| `destr` | Fast JSON parsing |
-| `ufo` | URL and path utilities |
-| `mlly` | Module utilities |
-
-## Testing Guidelines
-
-- Place test files alongside source files with `.test.ts` extension
-- Use Vitest with globals enabled
-- Follow AAA pattern: Arrange, Act, Assert
-- Mock filesystem operations where appropriate
-- Test both success and error paths
-
-## Common Patterns
-
-### Adapter Pattern
-
-Each agent (Claude Code, Cursor, Gemini CLI, OpenCode) has an adapter in `src/adapters/`:
-
-```typescript
-// Base interface all adapters must implement
-export interface AgentAdapter {
-  detect(): boolean;
-  listExtensions(): Promise<Extension[]>;
-  addExtension(extension: Extension): Promise<void>;
-  removeExtension(name: string): Promise<void>;
-  getAgentInfo?(): DetectedAgent;
-}
-
-// Concrete adapter implementation
-export class ClaudeAdapter implements AgentAdapter {
-  constructor(private config: AgentManagerConfig) {}
-
-  detect(): boolean {
-    return existsSync(this.config.agents['claude-code'].configPath);
-  }
-
-  async listExtensions(): Promise<Extension[]> {
-    const config = readJSONSync(this.configPath);
-    const mcpServers = config.mcpServers || {};
-    return Object.entries(mcpServers).map(([name, cfg]) => ({
-      name,
-      type: 'mcp' as const,
-      agent: 'claude-code' as const,
-      config: cfg as Record<string, unknown>,
-    }));
-  }
-}
-```
-
-### Registry Pattern
-
-Use `createAgentRegistry()` in `src/adapters/index.ts` to manage adapters:
-
-```typescript
-import { createAgentRegistry } from '../adapters/index.ts';
-
-export function createAgentRegistry(config: Config): AgentRegistry {
-  const adapters = new Map<AgentType, AgentAdapter>();
-  // Initialize adapters...
-  return { detect, listAllExtensions, getAdapter };
-}
-```
-
-### Result Objects
-
-Return structured results for operations:
-
-```typescript
-interface Result {
-  success: boolean;
-  extension: string;
-  installedTo: string[];
-  commit?: string;
-  tag?: string;
-  error?: string;
-}
-```
+- CLI has 13 cross-module imports (high centrality): imports from core, adapters, utils
+- src/cli/index.ts is the largest file (1330 lines) - all command definitions in one place
+- src/core/manifest.ts (1175 lines) - handles YAML manifest persistence
+- Git operations use simple-git with maxConcurrentProcesses: 6 for parallelism
+- Configuration supports ~ expansion and AGENT_MANAGER_HOME environment variable override
+- test-skill-repo/ contains skill examples for testing but not part of core build
