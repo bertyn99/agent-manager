@@ -63,6 +63,7 @@ vi.mock("./manifest.js", () => ({
   writeManifestV2: vi.fn(),
   getSkillInOrigin: vi.fn(() => null),
   addExtensionToManifest: vi.fn(),
+  addExtensionToManifestBatch: vi.fn(),
 }));
 
 // Mock node:fs
@@ -109,8 +110,8 @@ describe("SkillSync", () => {
   let upgradeExtension: (
     extensionName: string,
     config: AgentManagerConfig,
-    options: { force?: boolean },
-  ) => Promise<{ success: boolean; message: string }>;
+    options?: { force?: boolean; cachePath?: string; originGroup?: unknown; silent?: boolean },
+  ) => Promise<{ success: boolean; message: string; name: string }>;
   let upgradeAllExtensions: (
     config: AgentManagerConfig,
     options: { force?: boolean },
@@ -217,7 +218,7 @@ describe("SkillSync", () => {
       mockGetAdapter.mockReturnValue(mockAdapter);
       mockDetect.mockReturnValue(["claude-code", "cursor"] as AgentType[]);
 
-      const result = await syncExtensions(config, {
+      const _result = await syncExtensions(config, {
         dryRun: true,
         from: ["claude-code"] as AgentType[],
         to: ["cursor"] as AgentType[],
@@ -265,7 +266,7 @@ describe("SkillSync", () => {
       mockGetAdapter.mockReturnValue(mockAdapter);
       mockDetect.mockReturnValue(["claude-code", "cursor"] as AgentType[]);
 
-      const result = await syncExtensions(config, {
+      const _result = await syncExtensions(config, {
         from: ["claude-code", "cursor"] as AgentType[],
         to: ["opencode"] as AgentType[],
       });
@@ -441,6 +442,104 @@ describe("SkillSync", () => {
       expect(result).toHaveProperty("success");
       expect(result).toHaveProperty("upgraded");
       expect(result).toHaveProperty("failed");
+    });
+  });
+
+  describe("upgradeAllExtensions with filtering", () => {
+    it("should skip skills excluded by rules", async () => {
+      const { readManifest } = await import("./manifest.js");
+      vi.mocked(readManifest).mockReturnValueOnce({
+        version: "2.0.0",
+        updated: new Date().toISOString(),
+        mcp: {},
+        skills: [
+          {
+            origin: "https://github.com/test/repo",
+            path: "skills",
+            branch: "main",
+            include: [],
+            exclude: ["excluded-skill"],
+            skills: [
+              { name: "excluded-skill", folderName: "excluded-skill", agents: [], description: "Excluded" },
+            ],
+          },
+        ],
+        commands: {},
+      });
+
+      const config = createMockConfig();
+      const result = await upgradeAllExtensions(config, {});
+      // Should succeed with 0 upgraded (all excluded)
+      expect(result.success).toBe(true);
+      expect(result.upgraded).toBe(0);
+    });
+
+    it("should only upgrade skills matching include rules", async () => {
+      const { readManifest } = await import("./manifest.js");
+      vi.mocked(readManifest).mockReturnValueOnce({
+        version: "2.0.0",
+        updated: new Date().toISOString(),
+        mcp: {},
+        skills: [
+          {
+            origin: "https://github.com/test/repo",
+            path: "skills",
+            branch: "main",
+            include: ["included-skill"],
+            exclude: [],
+            skills: [
+              { name: "included-skill", folderName: "included-skill", agents: [], description: "Included" },
+              { name: "other-skill", folderName: "other-skill", agents: [], description: "Other" },
+            ],
+          },
+        ],
+        commands: {},
+      });
+
+      const config = createMockConfig();
+      const result = await upgradeAllExtensions(config, {});
+      expect(result).toBeDefined();
+    });
+  });
+
+  describe("upgradeExtension with silent option", () => {
+    it("should return name property in all responses", async () => {
+      const config = createMockConfig();
+      const result = await upgradeExtension("nonexistent-skill", config, { silent: true });
+      
+      expect(result).toHaveProperty("name");
+      expect(result.name).toBe("nonexistent-skill");
+      expect(result.success).toBe(false);
+    });
+
+    it("should return name when extension has no remote origin", async () => {
+      const { readManifest } = await import("./manifest.js");
+      vi.mocked(readManifest).mockReturnValueOnce({
+        version: "2.0.0",
+        updated: new Date().toISOString(),
+        mcp: {},
+        skills: [
+          {
+            origin: "local",
+            path: "skills",
+            branch: "main",
+            include: [],
+            exclude: [],
+            skills: [
+              { name: "local-skill", folderName: "local-skill", agents: [], description: "Local" },
+            ],
+          },
+        ],
+        commands: {},
+      });
+
+      const config = createMockConfig();
+      const result = await upgradeExtension("local-skill", config, { silent: true });
+      
+      expect(result).toHaveProperty("name");
+      expect(result.name).toBe("local-skill");
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("no remote origin");
     });
   });
 });

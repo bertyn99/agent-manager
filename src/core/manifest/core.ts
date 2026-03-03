@@ -1,7 +1,9 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "pathe";
-import { load as yamlLoad, dump as yamlDump } from "js-yaml";
+import { parseYAML, stringifyYAML } from "confbox";
 import type { AgentManagerManifest } from "../types.js";
+
+import { cachedRead, invalidateCache } from "../cache.js";
 
 export function getManifestPath(configHome: string): string {
   return join(configHome, "manifest.yaml");
@@ -11,6 +13,8 @@ export function readManifest(configHome: string): AgentManagerManifest {
   const manifestPath = getManifestPath(configHome);
 
   if (!existsSync(manifestPath)) {
+    // Invalidate any stale cache entry when file doesn't exist
+    invalidateCache(manifestPath);
     return {
       version: "2.0.0",
       updated: new Date().toISOString(),
@@ -21,8 +25,7 @@ export function readManifest(configHome: string): AgentManagerManifest {
   }
 
   try {
-    const content = readFileSync(manifestPath, "utf-8");
-    const parsed = yamlLoad(content) as AgentManagerManifest;
+    const parsed = cachedRead(manifestPath, (content: string) => parseYAML(content)) as AgentManagerManifest;
 
     return {
       version: parsed.version || "2.0.0",
@@ -51,7 +54,10 @@ export function writeManifest(configHome: string, manifest: AgentManagerManifest
   }
 
   manifest.updated = new Date().toISOString();
-  writeFileSync(manifestPath, yamlDump(manifest));
+  writeFileSync(manifestPath, stringifyYAML(manifest));
+  
+  // Invalidate cache after write to ensure fresh reads
+  invalidateCache(manifestPath);
 }
 
 export function clearManifest(configHome: string, agentType?: string): void {

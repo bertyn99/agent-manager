@@ -66,15 +66,13 @@ export async function runRemove(args: RemoveOptions) {
     const config = loadConfigSync();
     return await removeExtension(extensionName!, config, {
       from: targetAgents,
+      silent: !dryRun, // Silent when actually running (we log our own summary)
     });
   });
 
   if (!dryRun) {
-    if (result.success) {
-      logger.success(`Successfully removed extension "${result.extension}"`);
-      logger.info(`Removed from: ${result.removedFrom.join(", ")}`);
-    } else {
-      logger.error(`Failed to remove extension: ${result.error}`);
+    // Result already logged by skill-remover when not silent
+    if (!result.success) {
       process.exit(1);
     }
   }

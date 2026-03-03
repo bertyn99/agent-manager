@@ -1,11 +1,11 @@
 // Extension Sync - Synchronize/replicate extensions across agents
 
-import { existsSync, cpSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
-import { join, basename } from "pathe";
+import { existsSync, cpSync, rmSync, readdirSync } from "node:fs";
+import { join } from "pathe";
 import { logger } from "../utils/logger.js";
 import { createAgentRegistry } from "../adapters/index.js";
-import type { AgentManagerConfig, AgentType, Extension, SkillEntry } from "../core/types.js";
-import { addExtensionToManifest, readManifest } from "./manifest.js";
+import type { AgentManagerConfig, AgentType, Extension, SkillEntry, SkillOriginGroup, UnifiedSkill } from "../core/types.js";
+import { addExtensionToManifestBatch, readManifest } from "./manifest.js";
 import { detectExtensionFormat } from "./skill-installer.js";
 import { cloneSourceToCache } from "./manifest/sync.js";
 import { filterSkillsByRules } from "./manifest/filter.js";
@@ -39,6 +39,7 @@ function findSkillFolderRecursively(basePath: string, folderName: string): strin
 
   return null;
 }
+
 export interface SyncOptions {
   dryRun?: boolean;
   from?: AgentType[];
@@ -79,9 +80,9 @@ export async function syncExtensions(
   }
 
   // Determine source and target agents
-  const allEnabledAgents = Object.keys(config.agents).filter(
-    (a) => config.agents[a].enabled,
-  ) as AgentType[];
+  const allEnabledAgents = (Object.keys(config.agents) as AgentType[]).filter(
+    (a) => config.agents[a]?.enabled,
+  );
 
   const sourceAgents = options.from || allEnabledAgents;
   const targetAgents = options.to
@@ -101,13 +102,21 @@ export async function syncExtensions(
   logger.info(`Syncing from: ${sourceAgents.join(", ")}`);
   logger.info(`Syncing to: ${targetAgents.join(", ")}`);
 
-  // Get extensions from source agents
+  // Get extensions from source agents (parallel)
   const sourceExtensions: Extension[] = [];
-  for (const agentType of sourceAgents) {
-    const adapter = registry.getAdapter(agentType);
-    if (adapter && adapter.detect()) {
-      const extensions = await adapter.listExtensions();
-      sourceExtensions.push(...extensions);
+  const sourceExtensionResults = await Promise.allSettled(
+    sourceAgents.map(async (agentType) => {
+      const adapter = registry.getAdapter(agentType);
+      if (adapter && adapter.detect()) {
+        return adapter.listExtensions();
+      }
+      return [];
+    })
+  );
+
+  for (const extResult of sourceExtensionResults) {
+    if (extResult.status === "fulfilled") {
+      sourceExtensions.push(...extResult.value);
     }
   }
 
@@ -132,10 +141,11 @@ export async function syncExtensions(
 
     // Check manifest to prevent duplicates
     const manifest = readManifest(config.home);
-    const manifestInstalled = new Set(
+    const manifestInstalled = new Set<AgentType>(
       manifest.skills
-        .filter((s) => s.name === extensionName)
-        .flatMap((s) => s.agents.map((a) => a.agent)),
+        .flatMap((g) => g.skills ?? [])
+        .filter((s): s is SkillEntry => !!s && s.name === extensionName)
+        .flatMap((s) => s.agents ?? []),
     );
 
     // Check what exists on disk
@@ -186,29 +196,34 @@ export async function syncExtensions(
       }
     }
 
-    // Install to each missing target agent
-    for (const agentType of missingTargets) {
+    // Filter to compatible and available agents first
+    const compatibleTargets = missingTargets.filter(agentType => {
       const adapter = registry.getAdapter(agentType);
-      if (!adapter || !adapter.detect()) {
-        continue;
-      }
-
-      // Check if agent supports this extension format
+      if (!adapter || !adapter.detect()) return false;
+      
       const formats = extension?.formats || { mcp: { enabled: isMcp } };
       const canInstall = checkAgentCompatibility(agentType, formats);
-
+      
       if (!canInstall) {
         result.skipped++;
         result.details.push(`"${extensionName}" - ${agentType} doesn't support this format`);
-        continue;
+        return false;
       }
+      return true;
+    });
 
-      if (options.dryRun) {
+    // Handle dry-run
+    if (options.dryRun) {
+      for (const agentType of compatibleTargets) {
         logger.info(`[DRY RUN] Would install "${extensionName}" to ${agentType}`);
-        continue;
       }
+      continue;
+    }
 
-      try {
+    // Parallel installation to all compatible agents
+    const installResults = await Promise.allSettled(
+      compatibleTargets.map(async (agentType) => {
+        const adapter = registry.getAdapter(agentType)!;
         await adapter.addExtension({
           name: extension?.name || extensionName,
           type: sourceExt.type as "mcp" | "skill" | "command",
@@ -218,19 +233,30 @@ export async function syncExtensions(
           config: sourceConfig,
           enabled: true,
         });
+        return agentType;
+      })
+    );
 
-        // Track in manifest
-        addExtensionToManifest(config.home, extensionName, agentType, {
-          description: extension?.description || sourceExt.description,
-          path: isMcp ? undefined : sourcePath,
-        });
-
-        result.added.push(agentType);
-        logger.success(`Installed "${extensionName}" to ${agentType}`);
-      } catch (error) {
+    // Collect results
+    const successfulAgents: AgentType[] = [];
+    for (const installResult of installResults) {
+      if (installResult.status === "fulfilled") {
+        successfulAgents.push(installResult.value);
+        result.added.push(installResult.value);
+        logger.success(`Installed "${extensionName}" to ${installResult.value}`);
+      } else {
         result.failed++;
-        result.details.push(`"${extensionName}" to ${agentType}: ${String(error)}`);
+        const errorMsg = installResult.reason?.message || String(installResult.reason);
+        result.details.push(`"${extensionName}" installation failed: ${errorMsg}`);
       }
+    }
+
+    // Batch update manifest for all successful installations
+    if (successfulAgents.length > 0) {
+      addExtensionToManifestBatch(config.home, extensionName, successfulAgents, {
+        description: extension?.description || sourceExt.description,
+        path: isMcp ? undefined : sourcePath,
+      });
     }
   }
 
@@ -242,7 +268,7 @@ export async function syncExtensions(
 /**
  * Check if an agent supports a given extension format
  */
-function checkAgentCompatibility(agentType: AgentType, formats: Extension["formats"]): boolean {
+function checkAgentCompatibility(agentType: AgentType, formats: UnifiedSkill["formats"]): boolean {
   switch (agentType) {
     case "claude-code":
       // Claude Code supports both MCP servers and Agent Skills (SKILL.md format)
@@ -273,9 +299,13 @@ function checkAgentCompatibility(agentType: AgentType, formats: Extension["forma
 export async function upgradeExtension(
   extensionName: string,
   config: AgentManagerConfig,
-  options: { force?: boolean },
-): Promise<{ success: boolean; message: string }> {
-  logger.info(`Upgrading extension "${extensionName}"...`);
+  options?: { cachePath?: string; originGroup?: SkillOriginGroup; force?: boolean; silent?: boolean },
+): Promise<{ success: boolean; message: string; name: string }> {
+  const silent = options?.silent ?? false;
+  
+  if (!silent) {
+    logger.info(`Upgrading extension "${extensionName}"...`);
+  }
 
   const manifest = readManifest(config.home);
 
@@ -289,134 +319,219 @@ export async function upgradeExtension(
     return {
       success: false,
       message: `Extension "${extensionName}" not found in manifest`,
+      name: extensionName,
     };
   }
 
   // Find the origin group for this skill
-  const originGroup = manifest.skills.find((g) => g.skills?.some((s) => s?.name === extensionName));
+  const originGroup = options?.originGroup ?? manifest.skills.find((g) => g.skills?.some((s) => s?.name === extensionName));
 
   if (!originGroup || !originGroup.origin || originGroup.origin === "local") {
     return {
       success: false,
       message: `Extension "${extensionName}" has no remote origin (local or no origin)`,
+      name: extensionName,
     };
   }
 
-  logger.info(`Found origin: ${originGroup.origin}`);
+  if (!silent) {
+    logger.info(`Found origin: ${originGroup.origin}`);
+  }
 
-  // Re-clone the origin to get updates
-  try {
-    const cachePath = await cloneSourceToCache(
-      originGroup.origin,
-      originGroup.branch || "main",
-      config.home,
-    );
+  // Use provided cache path or clone fresh
+  let cachePath: string | undefined = options?.cachePath;
+  
+  if (!cachePath) {
+    // Re-clone the origin to get updates
+    try {
+      const clonedPath = await cloneSourceToCache(
+        originGroup.origin,
+        originGroup.branch || "main",
+        config.home,
+      );
 
-    if (!cachePath) {
-      return {
-        success: false,
-        message: `Failed to fetch updates from ${originGroup.origin}`,
-      };
+      if (!clonedPath) {
+        return {
+          success: false,
+          message: `Failed to fetch updates from ${originGroup.origin}`,
+          name: extensionName,
+        };
+      }
+      cachePath = clonedPath;
+    } catch (error) {
+        return {
+          success: false,
+          message: `Failed to fetch updates from ${originGroup.origin}: ${error}`,
+          name: extensionName,
+        };
     }
+  }
 
-    // Find the skill in the updated cache - search recursively
-    // First try the direct path from manifest
-    let skillPath: string | null = null;
-    const skillsPath = join(cachePath, originGroup.path || "skills");
-    
-    if (existsSync(skillsPath)) {
-      skillPath = findSkillFolderRecursively(skillsPath, skill.folderName);
-    }
-    
-    // If not found at manifest path, search entire cache
-    if (!skillPath) {
-      skillPath = findSkillFolderRecursively(cachePath, skill.folderName);
-    }
+  // Find the skill in the updated cache - search recursively
+  // First try the direct path from manifest
+  let skillPath: string | null = null;
+  const skillsPath = join(cachePath, originGroup.path || "skills");
+  
+  if (existsSync(skillsPath)) {
+    skillPath = findSkillFolderRecursively(skillsPath, skill.folderName);
+  }
+  
+  // If not found at manifest path, search entire cache
+  if (!skillPath) {
+    skillPath = findSkillFolderRecursively(cachePath, skill.folderName);
+  }
 
-    if (!skillPath) {
-      return {
-        success: false,
-        message: `Skill folder "${skill.folderName}" not found in ${originGroup.origin}. The manifest may have incorrect origin/path, or the skill was removed from the repo.`,
-      };
-    }
+  if (!skillPath) {
+    return {
+      success: false,
+      message: `Skill folder "${skill.folderName}" not found in ${originGroup.origin}. The manifest may have incorrect origin/path, or the skill was removed from the repo.`,
+      name: extensionName,
+    };
+  }
 
-    // Detect the extension format
-    const extension = detectExtensionFormat(skillPath);
-    if (!extension) {
-      return {
-        success: false,
-        message: `Invalid extension format for "${extensionName}"`,
-      };
-    }
+  // Detect the extension format
+  const extension = detectExtensionFormat(skillPath);
+  if (!extension) {
+    return {
+      success: false,
+      message: `Invalid extension format for "${extensionName}"`,
+      name: extensionName,
+    };
+  }
 
-    // Sync to all agents where this skill is installed
-    const registry = createAgentRegistry(config);
-    let updatedCount = 0;
-
-    for (const agentType of skill.agents) {
+  // Sync to all agents where this skill is installed (parallel)
+  const registry = createAgentRegistry(config);
+  
+  const updateResults = await Promise.allSettled(
+    skill.agents.map(async (agentType) => {
       const adapter = registry.getAdapter(agentType);
       if (!adapter || !adapter.detect()) {
-        logger.warn(`Agent ${agentType} not available, skipping`);
-        continue;
-      }
-
-      try {
-        // Remove old version first
-        const agentSkillsPath = join(config.agents[agentType]?.skillsPath || "", skill.folderName);
-        if (existsSync(agentSkillsPath)) {
-          rmSync(agentSkillsPath, { recursive: true });
+        if (!silent) {
+          logger.warn(`Agent ${agentType} not available, skipping`);
         }
-
-        // Copy updated version
-        cpSync(skillPath, agentSkillsPath, { recursive: true });
-
-        updatedCount++;
-        logger.success(`Updated "${extensionName}" for ${agentType}`);
-      } catch (error) {
-        logger.error(`Failed to update ${agentType}: ${error}`);
+        return null;
       }
-    }
 
-    if (updatedCount > 0) {
-      return {
-        success: true,
-        message: `Successfully upgraded "${extensionName}" for ${updatedCount} agent(s)`,
-      };
-    }
+      // Remove old version first
+      // Remove old version first
+      const agentSkillsPath = join(config.agents[agentType]?.skillsPath || "", skill.folderName);
+      if (existsSync(agentSkillsPath)) {
+        rmSync(agentSkillsPath, { recursive: true });
+      }
 
+      // Copy updated version
+      cpSync(skillPath, agentSkillsPath, { recursive: true });
+      if (!silent) {
+        logger.success(`Updated "${extensionName}" for ${agentType}`);
+      }
+      return agentType;
+    })
+  );
+
+  const updatedCount = updateResults.filter(r => r.status === "fulfilled" && r.value !== null).length;
+
+  if (updatedCount > 0) {
     return {
-      success: false,
-      message: `No agents were updated for "${extensionName}"`,
+      success: true,
+      message: `Successfully upgraded "${extensionName}" for ${updatedCount} agent(s)`,
+      name: extensionName,
     };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Upgrade failed: ${error}`,
-    };
+  }
+
+  return {
+    success: false,
+    message: `No agents were updated for "${extensionName}"`,
+    name: extensionName,
+  };
+}
+
+/**
+ * Extract short repo name from URL
+ */
+function getShortRepoName(url: string): string {
+  try {
+    const match = url.match(/github\.com[/:]([^/]+\/[^/.]+)/);
+    if (match) return match[1];
+    // Generic URL parsing
+    const urlObj = new URL(url.replace("git@", "https://"));
+    const pathParts = urlObj.pathname.replace(/^\//, "").replace(/\.git$/, "").split("/");
+    if (pathParts.length >= 2) {
+      return `${pathParts[0]}/${pathParts[1]}`;
+    }
+    return url;
+  } catch {
+    return url;
   }
 }
 
 /**
- * Upgrade all extensions
+ * Upgrade all extensions - optimized to clone each repo ONCE
+ * Groups output by repository for cleaner UX
  */
 export async function upgradeAllExtensions(
   config: AgentManagerConfig,
-  options: { force?: boolean },
+  _options?: { force?: boolean },
 ): Promise<{ success: boolean; upgraded: number; failed: number }> {
-  logger.info("Upgrading all extensions...");
-
   const manifest = readManifest(config.home);
   const result = { success: false, upgraded: 0, failed: 0 };
 
-  // Process each origin group that has a remote origin
+  // Collect all origin groups with installed skills
+  const originsToProcess: SkillOriginGroup[] = [];
+  
   for (const originGroup of manifest.skills) {
-    // Skip entries without origin or local skills
-    if (!originGroup.origin || originGroup.origin === "local") {
-      continue;
-    }
+    if (!originGroup.origin || originGroup.origin === "local") continue;
+    if (!originGroup.skills || !Array.isArray(originGroup.skills)) continue;
 
-    // Skip entries without skills array
-    if (!originGroup.skills || !Array.isArray(originGroup.skills)) {
+    const hasInstalledSkills = originGroup.skills.some(
+      (s) => s.agents && s.agents.length > 0
+    );
+    
+    if (hasInstalledSkills) {
+      originsToProcess.push(originGroup);
+    }
+  }
+
+  if (originsToProcess.length === 0) {
+    logger.info("No extensions to upgrade");
+    return { success: true, upgraded: 0, failed: 0 };
+  }
+
+  // Count total skills to upgrade
+  const totalSkills = originsToProcess.reduce((acc, g) => {
+    return acc + (g.skills?.filter(s => s.agents && s.agents.length > 0).length || 0);
+  }, 0);
+
+  logger.info(`Upgrading ${totalSkills} skills from ${originsToProcess.length} repositories...`);
+
+  // Process each unique origin
+  for (const originGroup of originsToProcess) {
+    const repoName = getShortRepoName(originGroup.origin);
+    const skillsToUpgrade = (originGroup.skills ?? []).filter(
+      s => s.agents && s.agents.length > 0
+    );
+
+    if (skillsToUpgrade.length === 0) continue;
+
+    // Show spinner while fetching repo
+    logger.start(`Fetching ${repoName} (${skillsToUpgrade.length} skills)...`);
+    
+    // Clone the origin ONCE
+    let cachePath: string | null = null;
+    try {
+      cachePath = await cloneSourceToCache(
+        originGroup.origin,
+        originGroup.branch || "main",
+        config.home,
+      );
+
+      if (!cachePath) {
+        logger.fail(`Failed to fetch ${repoName}`);
+        result.failed += skillsToUpgrade.length;
+        continue;
+      }
+    } catch (error) {
+      logger.fail(`Failed to fetch ${repoName}: ${error}`);
+      result.failed += skillsToUpgrade.length;
       continue;
     }
 
@@ -428,25 +543,79 @@ export async function upgradeAllExtensions(
       originGroup.exclude || [],
     );
 
-    // Only process skills that pass the filter
-    const filteredSkills = originGroup.skills.filter((s) =>
+    const filteredSkills = skillsToUpgrade.filter((s) =>
       filteredFolderNames.includes(s.folderName),
     );
 
-    for (const skill of filteredSkills) {
-      // Only upgrade skills that are installed to at least one agent
-      if (!skill.agents || skill.agents.length === 0) {
-        continue;
-      }
+    // Skip if no skills pass the filter
+    if (filteredSkills.length === 0) {
+      logger.success(`${repoName} (0 skills - all excluded by rules)`);
+      continue;
+    }
+    // Track results for this repo
+    const repoResults: { name: string; success: boolean }[] = [];
 
-      const upgradeResult = await upgradeExtension(skill.name, config, { force: options.force });
-      if (upgradeResult.success) {
-        result.upgraded++;
+    // Upgrade all skills from this origin in PARALLEL
+    const upgradeResults = await Promise.allSettled(
+      filteredSkills.map(async (skill) => {
+        const upgradeResult = await upgradeExtension(skill.name, config, {
+          cachePath: cachePath!,
+          originGroup,
+          silent: true, // Suppress individual logging
+        });
+        return { name: skill.name, ...upgradeResult };
+      })
+    );
+
+    // Collect results - track skill names for rejected promises
+    for (let i = 0; i < upgradeResults.length; i++) {
+      const upgradeResult = upgradeResults[i];
+      const skillName = filteredSkills[i]?.name || "unknown";
+      
+      if (upgradeResult.status === "fulfilled") {
+        repoResults.push({
+          name: upgradeResult.value.name,
+          success: upgradeResult.value.success,
+        });
+        if (upgradeResult.value.success) {
+          result.upgraded++;
+        } else {
+          result.failed++;
+        }
       } else {
+        // Rejected promise - track the skill name
+        repoResults.push({ name: skillName, success: false });
         result.failed++;
-        logger.warn(`Failed to upgrade ${skill.name}: ${upgradeResult.message}`);
       }
     }
+
+    // Show repo summary
+    const succeeded = repoResults.filter(r => r.success);
+    const failed = repoResults.filter(r => !r.success);
+    
+    if (failed.length === 0) {
+      logger.success(`${repoName} (${succeeded.length}/${repoResults.length})`);
+      // Show upgraded skills on separate lines
+      for (const s of succeeded) {
+        logger.log(`  ✓ ${s.name}`);
+      }
+    } else {
+      logger.warn(`${repoName} (${succeeded.length}/${repoResults.length} upgraded, ${failed.length} failed)`);
+      for (const s of succeeded) {
+        logger.log(`  ✓ ${s.name}`);
+      }
+      for (const s of failed) {
+        logger.log(`  ✗ ${s.name}`);
+      }
+    }
+  }
+
+  // Final summary
+  logger.log("");
+  if (result.failed === 0) {
+    logger.success(`Upgraded ${result.upgraded} skills from ${originsToProcess.length} repositories`);
+  } else {
+    logger.warn(`Upgraded ${result.upgraded}, failed ${result.failed} from ${originsToProcess.length} repositories`);
   }
 
   result.success = result.failed === 0;

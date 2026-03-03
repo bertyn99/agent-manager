@@ -1,6 +1,6 @@
 // Extension Remover - Handles removing extensions from different agents
 
-import { existsSync, unlinkSync, rmSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { join } from "pathe";
 import { logger } from "../utils/logger.js";
 import { createAgentRegistry } from "../adapters/index.js";
@@ -14,6 +14,7 @@ import {
 export interface RemoveOptions {
   from?: AgentType[];
   force?: boolean;
+  silent?: boolean;
 }
 
 export interface RemoveResult {
@@ -39,6 +40,7 @@ export async function removeExtension(
   config: AgentManagerConfig,
   options: RemoveOptions,
 ): Promise<RemoveResult> {
+  const silent = options.silent ?? false;
   const result: RemoveResult = {
     success: false,
     extension: extensionName,
@@ -48,32 +50,44 @@ export async function removeExtension(
   // Determine target agents
   const targetAgents = options.from || (Object.keys(config.agents) as AgentType[]);
 
-  logger.info(`Removing extension "${extensionName}"...`);
-  logger.info(`Target agents: ${targetAgents.join(", ")}`);
+  if (!silent) {
+    logger.start(`Removing "${extensionName}" from ${targetAgents.length} agent(s)...`);
+  }
 
-  // Remove from each target agent
-  for (const agentType of targetAgents) {
-    if (!config.agents[agentType].enabled) {
-      logger.warn(`${agentType} is disabled in config`);
-      continue;
-    }
+  // Remove from each target agent (parallel)
+  const removeResults = await Promise.allSettled(
+    targetAgents.map(async (agentType) => {
+      if (!config.agents[agentType]?.enabled) {
+        return { agent: agentType, removed: false, reason: "disabled" };
+      }
 
-    const removed = await removeFromAgent(extensionName, agentType, config, options);
+      const removed = await removeFromAgent(extensionName, agentType, config, options);
+      if (removed) {
+        removeExtensionFromManifest(config.home, extensionName, agentType);
+      }
+      return { agent: agentType, removed };
+    })
+  );
 
-    if (removed) {
-      result.removedFrom.push(agentType);
-      // Remove from manifest
-      removeExtensionFromManifest(config.home, extensionName, agentType);
+  // Collect results
+  for (const removeResult of removeResults) {
+    if (removeResult.status === "fulfilled" && removeResult.value.removed) {
+      result.removedFrom.push(removeResult.value.agent);
     }
   }
 
   result.success = result.removedFrom.length > 0;
 
-  if (result.success) {
-    logger.success(`Successfully removed from ${result.removedFrom.length} agent(s)`);
-  } else {
-    result.error = "Extension not found in any target agent";
-    logger.warn(result.error);
+  if (!silent) {
+    if (result.success) {
+      logger.success(`Removed "${extensionName}" from ${result.removedFrom.length} agent(s)`);
+      for (const agent of result.removedFrom) {
+        logger.log(`  ✓ ${agent}`);
+      }
+    } else {
+      result.error = "Extension not found in any target agent";
+      logger.warn(result.error);
+    }
   }
 
   return result;

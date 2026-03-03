@@ -108,6 +108,54 @@ export function addExtensionToManifest(
   writeManifest(configHome, manifest);
 }
 
+export function addExtensionToManifestBatch(
+  configHome: string,
+  skillName: string,
+  agents: AgentType[],
+  options: {
+    description?: string;
+    repo?: string;
+    commit?: string;
+    path?: string;
+  },
+): void {
+  const manifest = readManifest(configHome);
+  const origin = options.repo || "local";
+  let originGroup = manifest.skills.find((g) => g.origin === origin);
+
+  if (!originGroup) {
+    originGroup = {
+      origin,
+      path: options.path || "skills",
+      branch: "main",
+      include: [],
+      exclude: [],
+      skills: [],
+    };
+    manifest.skills.push(originGroup);
+  }
+
+  let skill = originGroup.skills.find((s) => s.name === skillName);
+
+  if (!skill) {
+    skill = {
+      name: skillName,
+      folderName: skillName,
+      agents: [],
+      description: options.description,
+    };
+    originGroup.skills.push(skill);
+  }
+
+  for (const agent of agents) {
+    if (!skill.agents.includes(agent)) {
+      skill.agents.push(agent);
+    }
+  }
+
+  writeManifest(configHome, manifest);
+}
+
 export function removeExtensionFromManifest(
   configHome: string,
   skillName: string,

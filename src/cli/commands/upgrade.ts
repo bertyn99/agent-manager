@@ -18,8 +18,7 @@ export async function runUpgrade(args: UpgradeOptions) {
   }
 
   if (args.all) {
-    const result = await upgradeAllExtensions(config, { force: args.force });
-    logger.info(`Upgraded: ${result.upgraded}, Failed: ${result.failed}`);
+    await upgradeAllExtensions(config, { force: args.force });
   } else {
     const result = await upgradeExtension(args.extension!, config, { force: args.force });
     logger.info(result.message);

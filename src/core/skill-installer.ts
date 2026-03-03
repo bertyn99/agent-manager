@@ -36,6 +36,7 @@ export interface AddOptions {
   includeSelect?: boolean;
   excludeSelect?: boolean;
   path?: string;
+  silent?: boolean;
 }
 
 export interface AddResult {
@@ -553,8 +554,12 @@ export async function addExtension(
   // Determine target agents
   const targetAgents = options.to || (Object.keys(config.agents) as AgentType[]);
 
-  logger.info(`Adding extension from ${repo}...`);
-  logger.info(`Target agents: ${targetAgents.join(", ")}`);
+  const silent = options.silent ?? false;
+
+  if (!silent) {
+    logger.info(`Adding extension from ${repo}...`);
+    logger.info(`Target agents: ${targetAgents.join(", ")}`);
+  }
 
   // Create temp directory for cloning
   const tempDir = join(config.vendorPath, "temp");
