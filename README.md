@@ -14,6 +14,23 @@ Universal CLI tool to manage extensions (MCP servers, skills, commands) across m
 ## Installation
 
 ```bash
+# Via npm (recommended)
+npm install -g agent-manager
+
+# Via pnpm
+pnpm add -g agent-manager
+
+# Via yarn
+yarn global add agent-manager
+
+# From source (development)
+cd agent-manager
+pnpm install
+pnpm build
+pnpm link --global
+```
+
+```bash
 # From source
 cd agent-manager
 pnpm install

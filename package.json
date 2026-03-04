@@ -3,27 +3,43 @@
   "version": "1.1.0",
   "description": "Universal CLI to manage skills, agents, and commands across multiple AI coding assistants (Claude Code, Cursor, Gemini CLI, OpenCode, VS Code Copilot)",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
   "bin": {
-    "agent-manager": "./dist/index.js",
-    "ag-manager": "./dist/index.js",
-    "agm": "./dist/index.js"
+    "agent-manager": "./dist/index.mjs",
+    "ag-manager": "./dist/index.mjs",
+    "agm": "./dist/index.mjs"
   },
   "files": [
     "dist",
-    "scripts",
-    "package.json",
+    "LICENSE",
     "README.md"
   ],
+  "sideEffects": false,
   "scripts": {
+    "check": "publint",
     "build": "tsdown",
     "dev": "tsdown --watch",
     "test": "vitest",
     "lint": "oxlint --import --jsx --jsx-a11y --typescript",
     "format": "oxfmt --write src/",
-    "prepublishOnly": "pnpm run build",
+    "release": "bumpp --commit --tag --push",
     "setup": "node scripts/setup.js",
-    "postinstall": "node scripts/setup.js"
+    "postinstall": "node scripts/setup.js",
+    "watch": "node scripts/watch.mjs"
   },
   "keywords": [
     "ai",
@@ -42,7 +58,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bertyn99/agent-manager.git"
+    "url": "git+https://github.com/bertyn99/agent-manager.git"
   },
   "bugs": {
     "url": "https://github.com/bertyn99/agent-manager/issues"
@@ -51,6 +67,7 @@
   "dependencies": {
     "c12": "^3.3.3",
     "citty": "^0.2.0",
+    "confbox": "^0.2.4",
     "consola": "^3.4.2",
     "destr": "^2.0.3",
     "execa": "^9.6.1",
@@ -59,7 +76,9 @@
     "js-yaml": "^4.1.0",
     "mlly": "^1.7.3",
     "ofetch": "^1.5.1",
+    "ohash": "^2.0.11",
     "pathe": "^2.0.3",
+    "perfect-debounce": "^2.1.0",
     "prompts": "^2.4.2",
     "smol-toml": "^1.6.0",
     "std-env": "^3.8.0",
@@ -73,11 +92,14 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.5",
     "@types/prompts": "^2.4.9",
+    "chokidar": "^4.0.0",
     "oxfmt": "^0.27.0",
     "oxlint": "^1.42.0",
+    "publint": "^0.3.4",
     "tsdown": "^0.20.0",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.6"
+    "vitest": "^3.0.6",
+    "bumpp": "^10.0.3"
   },
   "engines": {
     "node": ">=20.0.0"
