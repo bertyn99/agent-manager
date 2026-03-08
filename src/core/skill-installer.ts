@@ -962,9 +962,14 @@ export async function addGlobalSkill(
         await installSkillToGlobal(cleanSkillName, skillPath, globalSkillsPath, options.dryRun);
 
         if (!options.dryRun) {
-          addExtensionToManifest(config.home, cleanSkillName, "claude-code", {
+          // Use the SKILL.md frontmatter name if available (e.g. "vercel-composition-patterns")
+          // so manifest name matches what agm list shows
+          const extensionMeta = detectExtensionFormat(skillPath);
+          const manifestName = extensionMeta?.name || cleanSkillName;
+          addExtensionToManifest(config.home, manifestName, "claude-code", {
             repo,
             path: options.path || "skills",
+            description: extensionMeta?.description,
           });
         }
       }
@@ -995,6 +1000,7 @@ export async function addGlobalSkill(
         addExtensionToManifest(config.home, extension.name, "claude-code", {
           repo,
           path: options.path || "skills",
+          description: extension.description,
         });
       }
 
